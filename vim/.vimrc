@@ -10,6 +10,7 @@ Plug 'rking/ag.vim'
 
 call plug#end()
 
+set mouse=a
 set backup
 set number
 set expandtab
