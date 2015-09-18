@@ -12,6 +12,9 @@ trap 'error_handler' ERR
 
 export EDITOR=/usr/bin/vim
 
+# Resaltado de sintaxis. Hace Falta tener instalado
+source /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+
 [[ $- != *i* ]] && return
 if [ -f /usr/bin/archey ]; then archey; fi
 alias reload="~/.zshrc"
