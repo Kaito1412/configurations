@@ -15,4 +15,3 @@ cp -r ~/.zsh ~/Workspace/configurations/zsh/.zsh
 git add .
 git commit -m "update" 
 git push origin
-
