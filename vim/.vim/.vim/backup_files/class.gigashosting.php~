@@ -553,6 +553,10 @@ class gigashosting extends HostingModule implements Observer
         $account_details = $this->getAccountDetails();
         $user_api = new GigasApi($this->getAccountDetails());
 
+        var_dump($this->options);
+        var_dump($user_api);
+        die("hola");
+
         if ($this->options['option10']['value'] == 'Single Machine, autocreation') {
             $deploy_vm = true;
             try {
