@@ -13,6 +13,6 @@ cp ~/.zshrc ~/Workspace/configurations/zsh/.zshrc
 cp -r ~/.zsh ~/Workspace/configurations/zsh/.zsh
 
 git add .
-git commit -m "update" 
+git commit -m "$1"
 git push origin
 
