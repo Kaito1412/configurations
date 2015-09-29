@@ -1,0 +1,12 @@
+# ionic
+
+## Instalación de ionic
+
+1. Sin yoman
+
+npm install -g bower glup ionic cordova
+
+## Crear un proyecto nuevo
+
+ionic start -a "helloWorld" -i app.hello.thirdHello hello3 sidemenu
+

@@ -1,0 +1,1065 @@
+<?php
+
+/**
+ * Gigas Api Extras
+ *
+ * allows to define some custom functions to extend hostbill's api
+ *
+ */
+
+class gigasapiextras extends OtherModule
+{
+    protected $info = array('havecron'=>false);
+
+    /*
+     * const NAME
+     * Note: This needs to reflect class name - case sensitive.
+     */
+    const NAME = 'GigasApiExtras';
+
+    const VER ='0.1';
+
+    private static $_BILLING_CYCLES = array("m", "s", "a");
+
+    /*
+     * protected $filename
+     * This needs to reflect actual filename of module - case sensitive.
+     */
+    protected $filename='class.gigasapiextras.php';
+
+    protected $configuration=array(
+        "valid_product_endings" => array(
+            "value"=>"dc,cloud,wp,bal",
+            "type"=>"input"
+        ),
+    );
+
+    /*
+     * Protected $description
+     * If you want, you can add description to module,
+     * so its potential users will know what its for.
+     */
+    protected $description='Extra functions to extend hostbill api';
+
+    /*
+     * protected $modname
+     * AKA. "Nice name" - you can additionally add this variable
+     * its contents will be displayed as module name after activation
+     */
+    protected $modname = 'Gigas Api Extras';
+
+    const SELECT= 1;
+    const QTY = 2;
+    const CHECKBOX = 3;
+    const INPUT = 4;
+    const RADIO = 5;
+    const TEXTAREA = 6;
+    const SLIDER = 7;
+    const DATEPICKER = 8;
+    const IDPROTECTION = 9;
+    const IDPROTECTION_ = 10; // por que esta repetido, hostbill, por que? :(
+    const MULTICHECKBOX = 12;
+    const ONAPPCLOUDSELEC = 13;
+
+
+    /**
+     * validateProductServerId
+     *
+     * can this product be provisioned on that server?
+     *
+     * @param int $product product id
+     * @param int $server  server id
+     *
+     * @return boolean is valid?
+     */
+    public function validateProductServerId($product, $server)
+    {
+        $q = "SELECT count(items.variable_id) " .
+            "FROM hb_config_items items " .
+            "LEFT JOIN hb_config_items_cat cat ON items.category_id=cat.id " .
+            "WHERE cat.product_id=:product and items.variable_id=:server and " .
+            "cat.variable='server_id' and not items.variable_id=''";
+        $query = $this->db->prepare($q);
+        if (!$query->execute(array("product"=>$product, "server"=>$server))) {
+            return false;
+        }
+        $num_servers = $query->fetchColumn(0);
+        //hbm_log_system("Num servers: $num_servers");
+        return intval($num_servers) > 0;
+    }
+
+    /**
+     * getValidProductServers
+     *
+     * given a product and optionally a location, show where can it be provisioned
+     *
+     * @param int $product  to be searched
+     * @param int $location where to limit the search
+     *
+     * @return array containing valid items.
+     */
+    public function getValidProductServers($product, $location = null)
+    {
+        $q_select = "SELECT items.variable_id ";
+        $q_body = "FROM hb_config_items items " .
+            "LEFT JOIN hb_config_items_cat cat ON items.category_id=cat.id ";
+        $q_where = "WHERE cat.product_id=:product AND cat.variable='server_id' " .
+            "AND NOT items.variable_id='' ";
+        $params = array("product"=>$product);
+        if (!empty($location)) {
+            $q_body = $q_body . "LEFT join hb_servers srv ON srv.id = items.variable_id ";
+            $q_where = $q_where . "and srv.group_id = :location";
+            $params["location"] = $location;
+        }
+        $query = $this->db->prepare($q_select . $q_body . $q_where);
+        $query->execute($params);
+        $result = $query->fetchAll(PDO::FETCH_COLUMN, 0);
+        $query->closeCursor();
+        return $result;
+    }
+
+
+    /**
+     * find_license_config_type
+     *
+     * @param int $product_id product to look config for
+     *
+     * @return int constant of option type
+     */
+    protected function findLicenseConfigType($product_id)
+    {
+        $q = "SELECT type FROM hb_config_items_cat WHERE product_id=:product";
+        $query = $this->db->prepare($q);
+        if (!$query->execute(array("product"=>$product_id))) {
+            hbm_log_error("Error finding the config type of the license $product_id");
+            return null;
+        }
+        //hbm_log_system("query: $q || $product_id");
+        return $query->fetchColumn(0);
+    }
+
+    /**
+     * testLocation
+     *
+     * test configuration for location
+     *
+     * @param int   $product_id    product to be configured
+     * @param array $configuration parameters passed
+     *
+     * @return mixed true if success, reason if fails
+     */
+
+    protected function testLocation($product_id, $configuration)
+    {
+        if (!isset($configuration["server_id"])) {
+            return "Parameter server_id is not set";
+        }
+        if (!is_numeric($configuration["server_id"])) {
+            return "Parameter server_id is not a number";
+        }
+        $server_id = intval($configuration["server_id"]);
+        if (!$this->validateProductServerId($product_id, $server_id)) {
+            return "Invalid parameter server_id";
+        }
+        $option_data = $this->getConfigOption($product_id, "server_id", $server_id);
+        //hbm_log_system("option_data: " . print_r($option_data, true));
+        if ($option_data === false) {
+            return "Invalid parameter server_id";
+        }
+        return true;
+    }
+
+    /**
+     * testTemplate
+     *
+     * test configuration for templates
+     *
+     * @param int   $product_id    product to be configured
+     * @param array $configuration parameters passed
+     *
+     * @return mixed true if success, reason if fails
+     */
+
+    protected function testTemplate($product_id, $configuration)
+    {
+        if (!isset($configuration["template_id"])) {
+            return "Parameter template_id is not set";
+        }
+        if (!is_numeric($configuration["template_id"])) {
+            return "Parameter template_id is not a number";
+        }
+        $option_data=$this->getConfigOption(
+            $product_id,
+            false,
+            $configuration["template_id"],
+            false,
+            false,
+            "OS Template"
+        );
+        if ($option_data === false) {
+            return "Invalid parameter template_id";
+        }
+        return true;
+    }
+
+    /**
+     * testHostname
+     *
+     * test configuration for hostnames
+     *
+     * @param int   $product_id    product to be configured
+     * @param array $configuration parameters passed
+     *
+     * @return mixed true if success, reason if fails
+     */
+
+    protected function testHostname($product_id, $configuration)
+    {
+        if (!isset($configuration["hostname"])) {
+            return "Parameter hostname is not set";
+        }
+        $endings = array_map("trim", explode(",", $this->configuration["valid_product_endings"]["value"]));
+        $reg_endings = implode("|", array_filter($endings, "strlen"));
+        $host = $configuration["hostname"];
+        hbm_log_error("value :" . print_r($this->configuration["valid_product_endings"], true));
+        hbm_log_error("reg_endings: " . $reg_endings . " de endings: " . print_r($endings, true));
+        if (!preg_match(
+            "/^[a-zA-Z0-9](\-*[a-zA-Z0-9]+)*(\.[a-zA-Z0-9](\-*[a-zA-Z0-9]+)+)*\.(" . $reg_endings . ")$/",
+            $host
+        )) {
+            return "Invalid format for hostname parameter: " . $configuration["hostname"];
+        }
+        return true;
+    }
+
+    /**
+     * testQuantity
+     *
+     * test configuration for quantity
+     *
+     * @param int   $product_id    product to be configured
+     * @param array $configuration parameters passed
+     *
+     * @return mixed true if success, reason if fails
+     */
+
+    protected function testQuantity($product_id, $configuration)
+    {
+        if (!isset($configuration["quantity"])) {
+            return "Parameter quantity is not set";
+        }
+        if (!is_numeric($configuration["quantity"])) {
+            return "Parameter quantity is not a number";
+        }
+        $option_data = $this->getConfigOption($product_id, false, false, $this::QTY);
+        if ($option_data === false) {
+            return "This product can't be quantified";
+        }
+        return true;
+    }
+
+    /**
+     * testRadio
+     *
+     * test configuration for radio options
+     *
+     * @param int   $product_id    product to be configured
+     * @param array $configuration parameters passed
+     *
+     * @return mixed true if success, reason if fails
+     */
+
+    protected function testRadio($product_id, $configuration)
+    {
+        if (!isset($configuration["option"])) {
+            return "Parameter option is not set";
+        }
+        if (!is_numeric($configuration["option"])) {
+            return "Parameter option is not a number";
+        }
+        $option_choice = intval($configuration["option"]);
+        $option_data = $this->getConfigOption($product_id, false, false, $this::RADIO, $option_choice);
+        if ($option_data === false) {
+            return "Invalid option";
+        }
+        return true;
+    }
+
+    /**
+     * getConfigurationArray
+     *
+     * @param array $product product model from hostbill
+     *
+     * @return array config items to be tested/needed for the product
+     */
+
+    protected function getConfigurationArray($product)
+    {
+        $config_location = false;
+        $config_template = false;
+        $config_hostname = false;
+        $config_qty = false;
+        $config_radio = false;
+        $ptype = strtolower($product["ptype"]);
+        if ($ptype == "onappcloud") {
+            $config_location = true;
+            $is_vps = (substr($product["options"]["option10"], 0, 14) == "Single Machine");
+            $config_template = $is_vps;
+            $config_hostname = true;
+
+        } elseif ($ptype=="other") {
+            $config_type = $this->findLicenseConfigType($product["id"]);
+            hbm_log_system("Config type: $config_type");
+            if ($config_type === null) {
+                return "The product has an invalid configuration.";
+            } elseif ($config_type !== false) {
+                if ($config_type == $this::RADIO) {
+                    $config_radio = true;
+                } elseif ($config_type == $this::QTY) {
+                    $config_qty = true;
+                } else {
+                    hbm_log_error("Config type not known: $config_type");
+                    return "Error configuring option";
+                }
+            }
+
+        } else {
+            hbm_log_error(
+                "Don't know how to configure product [$product_id] with type "
+                . $product["ptype"]
+            );
+            return "Error configuring account";
+        }
+        return array(
+            "config_radio" => $config_radio,
+            "config_qty" => $config_qty,
+            "config_location"=>$config_location,
+            "config_hostname"=>$config_hostname,
+            "config_template"=>$config_template
+        );
+    }
+    /**
+     * testConfigureProduct
+     *
+     * given an account and a config string, try to put everythin in it's place
+     *
+     * @param int   $product_id    id to be configured
+     * @param array $configuration parameters to pass to the config
+     *
+     * @return success, on error returns a string with the cause of the error
+     */
+    public function testConfigureProduct($product_id, $configuration)
+    {
+        $product = HBLoader::loadcomponent('Products')->getProduct($product_id);
+        if ($product === false) {
+            $msg = "Product $product_id not found";
+            hbm_log_error($msg);
+            return $msg;
+        }
+        $test = $this->getConfigurationArray($product);
+        if (is_string($test)) {
+            return $test;
+        }
+
+        if ($test["config_location"]) {
+            $res = $this->testLocation($product_id, $configuration);
+            if (is_string($res)) {
+                return $res;
+            }
+            $test["config_location"] = "✓";
+        }
+        if ($test["config_template"]) {
+            $res = $this->testTemplate($product_id, $configuration);
+            if (is_string($res)) {
+                return $res;
+            }
+            $test["config_template"] = "✓";
+        }
+        if ($test["config_hostname"]) {
+            $res = $this->testHostname($product_id, $configuration);
+            if (is_string($res)) {
+                return $res;
+            }
+            $test["config_hostname"] = "✓";
+        }
+        if ($test["config_qty"]) {
+            $res = $this->testQuantity($product_id, $configuration);
+            if (is_string($res)) {
+                return $res;
+            }
+            $test["config_qty"] = "✓";
+        }
+        if ($test["config_radio"]) {
+            $res = $this->testRadio($product_id, $configuration);
+            if (is_string($res)) {
+                return $res;
+            }
+            $test["config_radio"] = "✓";
+        }
+
+        // not required, but checking validity if they exist
+        if (isset($configuration["cycle"])) {
+            $cycle = $configuration["cycle"];
+            switch ($cycle){
+            case "m":
+            case "s":
+            case "a":
+                $test["billing_cycle"] = "✓";
+                break;
+            default:
+                return "Invalid billing cycle. Valid options are " .
+                    implode(", ", $this->_BILLING_CYCLES);
+            }
+        }
+
+        $test["valid_config"] = true;
+        return $test;
+
+    }
+
+    /**
+     * configureProduct
+     *
+     * given an account and a config string, try to put everythin in it's place
+     *
+     * @param int   $account       id to be configured
+     * @param array $configuration parameters to pass to the config
+     *
+     * @return success, on error returns a string with the cause of the error
+     */
+    public function configureProduct($account, $configuration)
+    {
+        $manager = HBLoader::loadmodel("Accounts");
+        $acc = $manager->getAccount($account);
+        if ($acc === false) {
+            $msg = "Account $account not found";
+            hbm_log_error($msg);
+            return $msg;
+        }
+        if ($acc["status"] != "Pending") {
+            $msg = "Account already configured!";
+            hbm_log_error($msg);
+            return $msg;
+        }
+        $product = HBLoader::loadcomponent('Products')->getProduct($acc['product_id']);
+        if ($product === false) {
+            $msg = "Product $product_id not found";
+            hbm_log_error($msg);
+            return $msg;
+        }
+
+        $test = $this->getConfigurationArray($product);
+        if (is_string($test)) {
+            return $test;
+        }
+        $config_location = $test["config_location"];
+        $config_template = $test["config_template"];
+        $config_qty = $test["config_qty"];
+        $config_radio = $test["config_radio"];
+
+        $loc = $config_location?$this->configureLocation($acc, $configuration):null;
+        if ($loc !== false) {
+            if (is_string($loc)) {
+                return $loc;
+            }
+            if (!is_null($loc)) {
+                $test["config_location"] = "✓";
+                $test["location"] = $loc;
+            }
+        } else {
+            return "Error configuring product's server";
+        }
+        $tpl = $config_template?$this->configureTemplate($acc, $configuration):null;
+        if ($tpl !== false) {
+            if (is_string($tpl)) {
+                return $tpl;
+            }
+            if (!is_null($tpl)) {
+                $test["config_template"] = "✓";
+                $test["template"] = $tpl;
+            }
+        } else {
+            return "Error configuring template.";
+        }
+
+        $radio = $config_radio?$this->configureRadio($acc, $configuration):null;
+        if ($radio !== false) {
+            if (is_string($radio)) {
+                return $radio;
+            }
+            if (!is_null($radio)) {
+                $test["config_radio"] = "✓";
+                $test["radio"] = $qty;
+            }
+        } else {
+            return "Error configuring option.";
+        }
+        $qty = $config_qty?$this->configureQty($acc, $configuration):null;
+        if ($qty !== false) {
+            if (is_string($qty)) {
+                return $qty;
+            }
+            if (!is_null($qty)) {
+                $test["config_radio"] = "✓";
+                $test["radio"] = $radio;
+            }
+
+        } else {
+            return "Error configuring quantity.";
+        }
+
+        return $test;
+    }
+
+    /**
+     * configureLocation
+     *
+     * dcs and vps need to be located on a server
+     *
+     * @param AccountModel $account       account to configure it's location
+     * @param array        $configuration parameters, might have a server_id
+     *                                    or a location
+     *
+     * @return bool successful operation
+     */
+
+    protected function configureLocation($account, $configuration)
+    {
+        $product_id = intval($account["product_id"]);
+
+        $test_res = $this->testLocation($product_id, $configuration);
+        if (is_string($test_res)) {
+            return $test_res;
+        }
+        if (!$this->configureServer($account, $configuration["server_id"])) {
+            $msg = "Error configuring location for the account";
+            hbm_log_error($msg . ": " . $account["id"] . " with ". print_r($configuration, true));
+            return $msg;
+        }
+
+        $option_data = $this->getConfigOption($product_id, "server_id", $configuration["server_id"]);
+
+        return $this->initAccountConfig(
+            $account['id'],
+            $option_data['category_id'],
+            $option_data['id']
+        );
+    }
+
+    /**
+     * configureServer
+     *
+     * Establece el servidor del account.
+     *
+     * @param array $account account to be configured
+     * @param int   $server  server id
+     *
+     * @return success
+     */
+    protected function configureServer($account, $server)
+    {
+        $q = "UPDATE hb_accounts SET server_id=:server WHERE id=:account";
+        $query = $this->db->prepare($q);
+        return $query->execute(array("server"=>$server, "account"=>$account["id"]));
+    }
+
+    /**
+     * configureTemplate
+     *
+     * if the account is an vps, configure it's template
+     *
+     * @param AccountModel $account       account to configure it's location
+     * @param array        $configuration parameters, might have a server_id
+     *                                    or a location
+     *
+     * @return bool successful operation
+     */
+
+    protected function configureTemplate($account, $configuration)
+    {
+        $product_id = intval($account["product_id"]);
+        $test_res = $this->testTemplate($product_id, $configuration);
+        if (is_string($test_res)) {
+            return $test_res;
+        }
+        $tpl = $configuration["template_id"];
+        $option_data=$this->getConfigOption(
+            $product_id,
+            false,
+            $configuration["template_id"],
+            false,
+            false,
+            "OS Template"
+        );
+        return $this->initAccountConfig($account['id'], $option_data['category_id'], $option_data['id']);
+    }
+
+    /**
+     * configureQty
+     *
+     * configure account's quantity
+     *
+     * @param AccountModel $account       account to configure it's location
+     * @param array        $configuration parameters, should contain quantity
+     *
+     * @return bool successful operation
+     */
+    protected function configureQty($account, $configuration)
+    {
+        $product_id = intval($account["product_id"]);
+        $test_res = $this->testQuantity($product_id, $configuration);
+        if (is_string($test_res)) {
+            return $test_res;
+        }
+        $qty = intval($configuration["quantity"]);
+        $option_data = $this->getConfigOption($product_id, false, false, $this::QTY);
+        return $this->initAccountConfig(
+            $account['id'],
+            $option_data['category_id'],
+            $option_data['id'],
+            $qty
+        );
+    }
+
+    /**
+     * configureRadio
+     *
+     * Configure some radio option for the account
+     *
+     * @param AccountModel $account       account to configure it's location
+     * @param array        $configuration parameters, should contain option's value
+     *
+     * @return bool successful operation
+     */
+    protected function configureRadio($account, $configuration)
+    {
+        $product_id = intval($account["product_id"]);
+        $test_res = $this->testRadio($product_id, $configuration);
+        if (is_string($test_res)) {
+            return $test_res;
+        }
+        $option_choice = intval($configuration["option"]);
+        $option_data = $this->getConfigOption(
+            $product_id,
+            false,
+            false,
+            $this::RADIO,
+            $option_choice
+        );
+
+        return $this->initAccountConfig(
+            $account['id'],
+            $option_data['category_id'],
+            $option_data['id']
+        );
+    }
+
+    /**
+     * getConfigOption
+     * given a product, get the config option by it's variable name
+     *
+     * @param int    $product_id product to get the config option from
+     * @param string $var_name   which variable are you looking to configure?
+     * @param string $var_value  which value?
+     * @param int    $var_type   which type of option is it?
+     * @param int    $item_id    get the one that contains that item id
+     *
+     * @return array option id and category id or false on error
+     */
+    protected function getConfigOption(
+        $product_id,
+        $var_name = false,
+        $var_value = false,
+        $var_type = false,
+        $item_id = false,
+        $cat_name = false
+    ) {
+        $q = array("SELECT items.id id, cat.id category_id FROM hb_config_items items " .
+        "LEFT JOIN hb_config_items_cat cat ON cat.id=items.category_id " .
+        "WHERE cat.product_id=:product");
+        $params = array("product"=>$product_id);
+        if ($var_name !== false) {
+            $q[] = "cat.variable = :variable";
+            $params["variable"] = $var_name;
+        }
+        if ($var_value !== false) {
+            $q[] = "items.variable_id=:value";
+            $params["value"] = $var_value;
+        }
+        if ($var_type !== false) {
+            $q[] = "cat.type=:type";
+            $params["type"] = $var_type;
+        }
+        if ($cat_name !== false) {
+            $q[] = "cat.name=:category";
+            $params["category"] = $cat_name;
+        }
+        if ($item_id !== false) {
+            $q[] = "items.id=:item_id";
+            $params["item_id"] = $item_id;
+        }
+        $query = $this->db->prepare(implode(" AND ", $q));
+        if (!$query->execute($params)) {
+            hbm_log_error("Error trying to gather information for product location");
+            return false;
+        }
+        $option_data = $query->fetch(PDO::FETCH_ASSOC);
+        $query->closeCursor();
+        return $option_data;
+    }
+
+    /**
+     * initAccountConfig
+     *
+     * Safely set a config option to an account. Won't update if it's already set.
+     *
+     * @param int    $account_id  account to configure
+     * @param int    $category_id category to configure
+     * @param int    $config_id   config option used
+     * @param int    $quantity    number of items
+     * @param string $data        extra data
+     * @param string $type        type (Default hosting)
+     *
+     * @return bool succes
+     */
+
+    protected function initAccountConfig(
+        $account_id,
+        $category_id,
+        $config_id,
+        $quantity = 1,
+        $data = "",
+        $type = "Hosting"
+    ) {
+        $q_check = "SELECT count(*) FROM hb_config2accounts " .
+            "WHERE config_cat=:category AND account_id=:account";
+        $query_check = $this->db->prepare($q_check);
+        $params = array("category"=>$category_id, "account"=>$account_id);
+        if (!$query_check->execute($params)) {
+            hbm_log_error("Error while trying to know if $account_id has been already configured");
+            return false;
+        }
+        if ($query_check->fetch(PDO::FETCH_NUM)[0] > 0) {
+            hbm_log_error("Account [$account_id] already configured for category $category_id");
+            return false;
+        }
+        $q = "INSERT INTO hb_config2accounts " .
+            "(account_id, config_cat, config_id, qty, data, rel_type) VALUES " .
+            "(:account, :category, :config, :qty, :data, :type)";
+        $query = $this->db->prepare($q);
+        $params["config"] = $config_id;
+        $params["data"] = $data;
+        $params["qty"] = $quantity;
+        $params["type"] = $type;
+        if (!$query->execute($params)) {
+            hbm_log_error("Error trying to set config to " . print_r($params, true));
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * buyAddon
+     *
+     * @param int $addon_id       addont to buy
+     * @param int $account_id     account to attach the addon
+     * @param int $payment_module how should it be paid
+     *
+     * @return mixed success, on error return a string with the reasoning for that
+     */
+    public function buyAddon($addon_id, $account_id, $payment_module)
+    {
+
+        $acc_manager = HBLoader::loadmodel("Accounts");
+        $acc = $acc_manager->getAccount($account_id);
+        if ($acc===false) {
+            $msg =  "Account ($account_id) not found.";
+            hbm_log_error($msg);
+            return $msg;
+        }
+
+        $add_manager = HBLoader::loadmodel("AccountAddons");
+
+        $addon_id = $add_manager->addAddon(
+            $account_id,
+            $addon_id,
+            array("gateway"=>$payment_module, "invoice"=>"true") // Hostbill es Asin! True en string
+        );
+
+        if ($addon_id === false) {
+            $msg = "Addon couldn't be created";
+            hbm_log_error($msg);
+            return $msg;
+        }
+        $result = array("addon_id" => $addon_id);
+        // get the stuff
+        $q = "SELECT o.id order_id, iv.id invoice_id, ii.item_id addon_id " .
+            "FROM hb_invoice_items ii " .
+            "INNER JOIN hb_invoices iv ON ii.invoice_id = iv.id " .
+            "INNER JOIN hb_orders o ON o.invoice_id = iv.id " .
+            "WHERE ii.type='Addon' AND ii.item_id=:addon_id";
+        $query = $this->db->prepare($q);
+        if (! $query->execute(array("addon_id"=>$addon_id))) {
+            return "Invoicing went wrong";
+        }
+        return $query->fetch(PDO::FETCH_ASSOC);
+        /* $add = $add_manager->getAccountAddons($addon_id); */
+        /* if ($add === false) { */
+        /*     $msg =  "Addon [$addon_id] not found."; */
+        /*     hbm_log_error($msg); */
+        /*     return $msg; */
+        /* } */
+        /* // TODO: comprobar que el addon vale para el producto */
+    }
+
+    /**
+     * testClient
+     *
+     * Does the client exist? optionally include contacts
+     *
+     * @param int  $client_id        Id of the client to test
+     * @param bool $include_contacts should I include contacts or restrict to clients
+     *
+     * @return boolean states if client does exist
+     */
+    private function testClient($client_id, $include_contacts = false)
+    {
+
+        $q = "SELECT count(*) FROM hb_client_details WHERE id=:client";
+
+        if (!$include_contacts) {
+            $q = $q . " AND parent_id=0";
+        }
+
+        $query = $this->db->prepare($q);
+        if (!$query->execute(array("client" => $client_id))) {
+            hbm_log_error("error testing if client_id ($client_id) is a client: " . $query->errorInfo());
+        }
+        $col = $query->fetchColumn();
+        return $col[0] == 1;
+    }
+
+
+    /**
+     * buyProductByDraft
+     *
+     * buy a product by generating a draft of just 1 item with config
+     *
+     * @param int   $client_id      client purchasing the product
+     * @param int   $payment_module payment module being used to purchase
+     * @param int   $product_id     product being bought
+     * @param array $options        options aplicable to the configuration
+     *
+     * @return mixed
+     */
+
+    private function buyProductByDraft($client_id, $payment_module, $product_id, $options)
+    {
+        die();
+        // is the config ok? prove it!
+        $test = $this->testConfigureProduct($product_id, $options);
+        hbm_log_system("configure test results was: " . print_r($test, true));
+        if (is_string($test)) {
+            return $test;
+        }
+        if (!$this->testClient($client_id)) {
+            return "Client not found";
+        }
+        $cycle = isset($options["cycle"]) ? $options["cycle"] : "m";
+        HBLoader::loadcomponent('order/orderdraft');
+        $draft = new OrderDraft();
+        $draft->clearDraft();
+        // configure draft
+        $draft->payment_module = $payment_module;
+        $draft->setClient($client_id);
+        $draft->setDate(strftime("%F %T")); // "20140-06-10 11:07:35"
+        $send_invoice = isset($options["send_invoice"]) ? $options["send_invoice"] : true;
+        $draft->setOptions(false, true, $send_invoice);
+        $draft->createDraft();  // quiza haya que recargarlo a si mismo?
+        // add item
+        $hostname = isset($options["hostname"]) ? $options["hostname"] : "";
+        $service_id = $draft->addService($product_id, $cycle, $hostname);
+        $custom_options = isset($options["option"]) ? $options["option"] : null;
+        $custom_quantity = isset($options["quantity"]) ? $options["quantity"] : false;
+        $custom = $this->_getCustomOptionsArray(
+            $product_id,
+            $custom_options,
+            $custom_quantity
+        );
+        if ($custom === false) {
+            $msg = "Something went wrong trying to get the custom options";
+            hbm_log_error($msg);
+            $draft->deleteDraft();
+            return $msg;
+        }
+        //hbm_log_system("draft customizing!");
+        $res = $draft->addServiceCustomFields($service_id, $custom);
+        //hbm_log_system("custom field return was: " . print_r($res, true));
+        $draft->saveDraft();
+        $res = $draft->createOrder();
+        hbm_log_system("New order created: " . $res);
+        return array("draft_id"=> $draft->id, "order_id" => $res);
+    }
+
+    /**
+     * getCustomOptionsArray
+     *
+     * @param int   $product_id product to be configured
+     * @param array $options    array of option ids, as its ids are unique
+     *                          it'll figure out where to put them
+     *                          only valid for select/input
+     * @param int   $quantity   how many
+     *
+     * @return array to be passed to addServiceCustomFields or false if failed
+     */
+    private function _getCustomOptionsArray($product_id, $options = null, $quantity = false)
+    {
+        hbm_log_system("getting custom options with " . print_r(func_get_args(), true));
+        $custom = array();
+        if (!empty($options)) {
+            if (!is_array($options)) {
+                $options = array($options);
+            }
+            $in_stmt = implode(', ', array_fill(0, count($options), '?'));
+            $q_opt = "select ci.id, ci.category_id from hb_config_items ci " .
+                "inner join hb_config_items_cat cc on cc.id = ci.category_id " .
+                "where cc.product_id=? and ci.id in (" . $in_stmt . ") and cc.type in (1, 5)";
+            $query_opt = $this->db->prepare($q_opt);
+            $params = array_merge(array($product_id), $options);
+            $query_opt->bindValue('product', $product_id);
+            if (! $query_opt->execute($params)) {
+                hbm_log_error(
+                    "error while trying to fetch options for product $product_id:\n$q_opt\n".
+                    print_r($options, true)
+                );
+                return false;
+            }
+            while ($row = $query_opt->fetch(PDO::FETCH_ASSOC)) {
+                $custom[$row["category_id"]] = $row["id"];
+            }
+            $query_opt->closeCursor();
+        }
+        if ($quantity !== false) {
+            $q_qty = "select ci.id, ci.category_id from hb_config_items ci ".
+                "inner join hb_config_items_cat cc on cc.id = ci.category_id " .
+                "where cc.type=2 and cc.product_id=:product";
+            $query_qty = $this->db->prepare($q_qty);
+            if (!$query_qty->execute(array("product"=>$product_id))) {
+                hbm_log_error("error while trying to fetch qty option for product $product_id:\n$q_qty\n");
+                return false;
+            }
+            $row = $query_qty->fetch(PDO::FETCH_ASSOC);
+            $custom[$row["category_id"]] = array($row["id"]=>$quantity);
+        }
+        hbm_log_system("custom was " . print_r($custom, true));
+        return $custom;
+    }
+
+    /**
+     * buyLicense
+     *
+     * @param int   $client_id      client purchasing the license
+     * @param int   $payment_module module used to pay the license
+     * @param int   $product_id     license id
+     * @param array $options        configuration options
+     *                              (usually either option or quantity)
+     *
+     * @return mixed returns an array on success or a string explaining why it failed
+     */
+    public function buyLicense($client_id, $payment_module, $product_id, $options)
+    {
+        hbm_log_system("buying license");
+        //TODO: check product_id is a license
+        $q_is_license = "SELECT COUNT(*) FROM hb_products p " .
+            "INNER JOIN hb_categories c ON c.id = p.category_id AND c.name='licencias' " .
+            "WHERE p.id = :product";
+        $query_is_license = $this->db->prepare($q_is_license);
+        if (! $query_is_license->execute(array("product"=> $product_id))) {
+            $msg = "Error checking if product specified is a license";
+            hbm_log_error(
+                $msg . " product_id was [$product_id] and error was: " .
+                print_r($this->db->errorInfo(), true)
+            );
+            return $msg;
+        }
+        $count = $query_is_license->fetchColumn();
+        $query_is_license->closeCursor();
+        if (empty($count) || ($count[0] == 0)) {
+            return "Product [$product_id] is not a license.";
+        }
+        return $this->buyProductByDraft(
+            $client_id,
+            $payment_module,
+            $product_id,
+            $options
+        );
+    }
+
+    /**
+     * notifyHostbill
+     *
+     * @param string  $event      identifier of event
+     * @param params  $params     params
+     * @param params  $exclude     exclude
+     *
+     * @return bool
+     */
+    public function notifyHostbill($event, $params, $exclude)
+    {
+
+        hbm_log_system("notifying hostbill");
+        if ($exclude) {
+            $res = Engine::singleton()->notify($event, $params, $exclude);
+        } else {
+            $res = Engine::singleton()->notify($event, $params);
+        }
+        hbm_log_system("hostbill notification response: ".var_export($res, true));
+        return $res;
+    }
+
+
+    public function domainRegister($domain_id)
+    {
+
+        $gigasreseller = ModuleFactory::getModule("Domain", "class.gigasreseller.php");
+        $gigasreseller->getFromDB($domain_id);
+        $registered = $gigasreseller->Register();
+
+        if (!$registered) {
+            return array();
+        }
+
+        return array("success" => $registered, "call" => "domainRegister", "server_time" => time(), "info" => ($registered?array("Domain with ID #" . $domain_id . " registered."):""));
+    }
+
+    public function domainSync($domain_id)
+    {
+        $synchronized = false;
+        // Check if the module exists
+        $q = $this->db->prepare("SELECT id,extended,reg_module,name, next_due FROM hb_domains WHERE id=?  LIMIT 1");
+        $q->execute(array($domain_id));
+        $data = $q->fetch(PDO::FETCH_ASSOC);
+        $q->closeCursor();
+        $module = ModuleFactory::singleton()->getModuleById($data['reg_module']);
+        if (!method_exists($module, "synchInfo")) {
+            $q = $this->db->prepare(
+                "UPDATE hb_domains SET synch_date='" . date("Y-m-d H:i:s") . "', manual=0 WHERE id=?"
+            );
+            $q->execute(array($domain_id));
+        }
+        // If the module exists call synchInfo
+        $module->getFromDB($domain_id);
+        if ($module->getDomainId() == $domain_id) {
+            $info = $module->synchInfo();
+            if (!empty($info)) {
+                $synchronized = true;
+            }
+        }
+        if (!$synchronized) {
+            return array();
+        }
+        return array("success" => $synchronized, "call" => "domainSynch", "server_time" => time(), "info" => ($synchronized?array("Domain with ID #" . $domain_id . " synchronized."):""));
+    }
+
+
+}

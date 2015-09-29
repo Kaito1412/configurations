@@ -1,0 +1,74 @@
+# -*- coding:utf-8 -*-
+import cronbase
+import datetime
+import sys
+import os
+
+from orders.models import Order
+from accounts.models import Account
+from invoices.models import InvoiceItem
+from invoices.models import Currency
+from products.models import Product
+from clients.models import ClientDetail
+from main.utils import create_csv
+
+
+EXPORT_PATH = os.path.dirname(__file__).replace("cron", "exports/")
+
+date_range = [datetime.date(2010, 1, 1), datetime.date.today()]
+filename_sufix = '_all'
+extra_fields = ['product_id__id', 'client_id__id', 'is_client_trial', 'is_client_sponsored',
+                'account_type', 'date_cancelled']
+exclude_fields = ['client_id', 'username', 'password', 'rootpassword', 'notes', 'extra_details',
+                  'autosuspend', 'autosuspend_date', 'ns1', 'ns2', 'disk_usage', 'disk_limit',
+                  'bw_usage', 'bw_limit', 'date_changed', 'synch_date', 'synch_error',
+                  'user_error', 'domain_error', 'manual', 'mod_custom_id',
+                  'product_id', 'parent']
+queryset = Account.objects.filter(date_created__range=date_range).order_by('date_created')
+opts = queryset.model._meta
+filename = '%saccounts%s.csv' % (EXPORT_PATH, filename_sufix)
+create_csv(filename, opts, queryset, extra_fields, exclude_fields)
+
+
+date_range = [datetime.date(2010, 1, 1), datetime.date.today()]
+filename_sufix = '_all'
+extra_fields = ['client_id__id']
+exclude_fields = ['notes', 'order_ip', 'client_id', 'metadata']
+queryset = Order.objects.filter(date_created__range=date_range).order_by('date_created')
+opts = queryset.model._meta
+filename = '%sorders%s.csv' % (EXPORT_PATH, filename_sufix)
+create_csv(filename, opts, queryset, extra_fields, exclude_fields)
+
+
+date_range = [datetime.date.today() - datetime.timedelta(days=90), datetime.date.today()]
+filename_sufix = ''
+extra_fields = ['invoice_id__date', 'invoice_id__total', 'invoice_id__currency_id']
+exclude_fields = []
+queryset = InvoiceItem.objects.filter(invoice_id__date__range=date_range).order_by('invoice_id__id')
+opts = queryset.model._meta
+filename = '%sinvoices%s.csv' % (EXPORT_PATH, filename_sufix)
+create_csv(filename, opts, queryset, extra_fields, exclude_fields)
+
+
+extra_fields = ['category_id__name']
+exclude_fields = ['category_id', 'field_type', 'description', 'visible', 'domain_options', 'stock', 'qty', 'autosetup', 'subdomain', 'owndomain', 'tax', 'upgrades', 'extra', 'sort_order']
+queryset = Product.objects.all()
+opts = queryset.model._meta
+filename = '%sproducts.csv' % EXPORT_PATH
+create_csv(filename, opts, queryset, extra_fields, exclude_fields)
+
+
+extra_fields = []
+exclude_fields = ['sign', 'iso', 'rate', 'last_changes', 'update', 'enable', 'format_type']
+queryset = Currency.objects.all()
+opts = queryset.model._meta
+filename = '%scurrencies.csv' % EXPORT_PATH
+create_csv(filename, opts, queryset, extra_fields, exclude_fields)
+
+
+extra_fields = ['id__id', 'country', 'is_gigas']
+exclude_fields = ['id', 'parent_id', 'firstname', 'lastname', 'companyname', 'address1', 'address2', 'city', 'state', 'postcode', 'country', 'phonenumber', 'datecreated', 'notes', 'language', 'company']
+queryset = ClientDetail.objects.all()
+opts = queryset.model._meta
+filename = '%sclients.csv' % EXPORT_PATH
+create_csv(filename, opts, queryset, extra_fields, exclude_fields)

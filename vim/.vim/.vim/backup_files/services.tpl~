@@ -1,0 +1,490 @@
+{php}
+$this->assign('globals', $GLOBALS);
+{/php}
+{if $service}
+  <script>
+   {literal}
+   $(function()
+     {
+       var cats = $('.dom-head h2 span');
+       if (cats.length > 0 && isNaN(cats[0].textContent) && cats[0].textContent.indexOf("Balanceador") != -1)
+       {
+         splitMsg(cats.eq(0));
+         splitMsg(cats.eq(1));
+       }
+     });
+   {/literal}
+  </script>
+  <div class="dom-head">
+    <h2>
+      <img alt="dominios" src="{$template_dir}images/metal-dominios.png">
+      {if $service.product_id == $globals.products_config.vlan.id && $lang.vlans_service_name}
+        {$lang.vlans_service_name} - {$service.name}
+                    {elseif $service.catname|stripos:"backup" !== false or $service.catname|stripos:"backup" !== false}
+        {$lang[$service.name]}
+      {else}
+        <span>{if $lang[$service.catname]}{$lang[$service.catname]}{else}{$service.catname}{/if}</span> - <span>{if $lang[$service.name]}{$lang[$service.name]}{else}{$service.name}{/if}</span>
+      {/if}
+    </h2>
+    {if $vpsdo || $widget}{* || $vpsid}*}
+      {if $service.slug != 'advanced-backup'}
+        <a href="{$ca_url}clientarea/services/{$service.slug}/{$service.id}" class="afri">{$lang.backtocloud}</a>
+      {else}
+        <a href="{$ca_url}clientarea/services/" class="afri">{$lang.backtoservices}</a>
+      {/if}
+    {/if}
+  </div>
+
+  {if $showupgrades}
+
+    {include file=service_upgrades.tpl}
+
+  {/if}
+
+  {if $custom_template}
+
+    {include file=$custom_template}
+
+  {else}
+
+    {* <!-- Se muestra en servicios sin módulode hosting --> *}
+    <div class="left">
+
+      {if $service.isvpstpl && $service.ptype=='Server'}
+        {include file=services.vps.tpl}
+      {/if}
+
+      {if $service.ptype=='Server'}
+        <div class="tabb" style="display:none;" id="_ocustom"></div>
+      {/if}
+
+      <div class="formwrap fw2 pnl">
+        <div class="tstitle">
+          <h3>{$lang.billing_info}</h3>
+        </div>
+        <div class="dv dva">
+          <div class="servidor s-btn">
+            <ul class="lrg-ni">
+              <li class="serv">{$lang.service}
+                <span>
+                    {if $service.product_id == $globals.products_config.vlan.id && $lang.vlans_service_name}
+                        {$lang.vlans_service_name}
+                    {elseif $lang[$service.catname]}
+                        {$lang[$service.catname]}
+                    {else}
+                        {$service.catname}
+                    {/if}
+                    {if $service.slug == 'licencias'}
+                      {php}
+                          $service = $this->get_template_vars('service');
+                          $hapi = new GApiWrapper();
+                          $name = $hapi->getLicensesName($service['id']);
+                          $service['item_detail'] = $name;
+                          $this->assign('service', $service);
+                      {/php}
+                    {/if}
+                     - {if $lang[$service.name]}{$lang[$service.name]}  {$lang[$service.item_detail]} {else} {$service.name} {$lang[$service.item_detail]} {/if}
+                    {if $service.slug == 'vlan'}
+                        {php}
+                            $service = $this->get_template_vars('service');
+                            $db = Engine::singleton()->getObject("db");
+                            $q = $db->prepare('SELECT val.data as value FROM hb_config2accounts val inner join hb_config_items_cat item ON val.config_cat = item.id AND item.product_id = ? WHERE val.account_id = ? AND variable = "vlan_name"');
+                            $q->execute(array($service['product_id'], $service['id']));
+                            $values = $q->fetchAll(PDO::FETCH_ASSOC);
+                            $q->closeCursor();
+                            $this->assign('values', $values);
+                        {/php}
+                        {if $values[0].value}
+                          - {$values[0].value}
+                        {/if}
+                    {/if}
+                </span>
+              </li>
+              <li class="serv">{$lang.status} <span>{$lang[$service.status]}</span></li>
+              {if $service.slug == 'licencias' and $service.status == 'Active'}
+                {php}
+                $service = $this->get_template_vars('service');
+                $db = Engine::singleton()->getObject("db");
+                $q = $db->prepare('SELECT * FROM gigas_licenses WHERE account_id = ?');
+                $q->execute(array($service['id']));
+                $license = $q->fetch(PDO::FETCH_ASSOC);
+                $q->closeCursor();
+                $this->assign('qty', -1);
+                foreach($service['custom'] as $id=>$form)
+                {
+                if(array_key_exists('qty', $form) and array_key_exists('type', $form) and $form['type'] == 'qty')
+                {
+                $this->assign('qty', $form['qty']); break;
+                }
+                }
+                $this->assign('license_key', $license['license_key']);
+                {/php}
+                <li class="serv">{$lang.license_key} <span>{$license_key}</span></li>
+                {if $qty >= 0}
+                  <li class="serv">{$lang.servers|capitalize} <span>{$qty+1}</span></li>
+                {/if}
+              {/if}
+            </ul>
+          </div>
+        </div>
+
+        {if $service.showbilling}
+          {if $service.billingcycle!='Free' && $service.billingcycle!='Once'}
+            <div class="dv m-dv dva">
+              <div class="servidor">
+                <ul class="lrg-ni lif">
+                  <li>{$lang.bcycle} <span>{$lang[$service.billingcycle]}</span></li>
+                  <li class="lif-r">{$lang.reccuring_amount} <span>{$service.total|price:$currency}</span></li>
+                  <li>{$lang.nextdue} <span>{$service.next_due|dateformat:$date_format}</span></li>
+                  <li class="lif-r">
+                    {$lang.registrationdate} <span>{$service.date_created|dateformat:$date_format}</span>
+                  </li>
+                  <li>{$lang.firstpayment_amount} <span>{$service.firstpayment|price:$currency}</span></li>
+                </ul>
+              </div>
+            </div>
+          {/if}
+        {/if}
+        {if $service.slug == 'vpn-cisco'}
+          <div class="tstitle">
+            <h3>{$lang.config_info}</h3>
+          </div>
+          <div class="dv m-dv dva">
+              <div class="servidor">
+               {php}
+                $service = $this->get_template_vars('service');
+                $db = Engine::singleton()->getObject("db");
+                $q = $db->prepare('SELECT item.name as name, val.data as value FROM hb_config2accounts val inner join hb_config_items_cat item ON val.config_cat = item.id WHERE val.account_id = ?');
+                $q->execute(array($service['id']));
+                $values = $q->fetchAll(PDO::FETCH_ASSOC);
+                $q->closeCursor();
+                $this->assign('values', $values);
+                {/php}
+                <ul class="lrg-ni">
+                  {foreach from=$values item=val}
+                      <li>{$val.name} <span>{$val.value}</span></li>
+                  {/foreach}
+                </ul>
+              </div>
+            </div>
+        {/if}
+        <div class="renov">
+           {php}
+            $service = $this->get_template_vars('service');
+            $db = Engine::singleton()->getObject("db");
+            $q = $db->prepare('SELECT commitment_date FROM gigas_account_extradetails WHERE account_id = ? AND commitment_date IS NOT NULL');
+            $q->execute(array($service['id']));
+            $permanence = $q->fetch(PDO::FETCH_ASSOC);
+            $q->closeCursor();
+            if ($permanence) {
+                switch ($service['billingcycle']) {
+                    case 'Hourly':
+                        $limit_date = $nuevafecha = strtotime( '+1 second', strtotime ('-1 hour',strtotime($permanence['commitment_date'])));
+                        break;
+                    case 'Daily':
+                        $limit_date = $nuevafecha = strtotime( '+1 second', strtotime ('-1 day',strtotime($permanence['commitment_date'])));
+                        break;
+                    case 'Weekly':
+                        $limit_date = $nuevafecha = strtotime( '+1 second', strtotime ('-7 day',strtotime($permanence['commitment_date'])));
+                        break;
+                    case 'Monthly':
+                        $limit_date = $nuevafecha = strtotime( '+1 second', strtotime ('-1 month',strtotime($permanence['commitment_date'])));
+                        break;
+                    case 'Quarterly':
+                        $limit_date = $nuevafecha = strtotime( '+1 second', strtotime ('-4 month',strtotime($permanence['commitment_date'])));
+                        break;
+                    case 'Semi-Annually':
+                        $limit_date = $nuevafecha = strtotime( '+1 second', strtotime ('-6 month',strtotime($permanence['commitment_date'])));
+                        break;
+                    case 'Annually':
+                        $limit_date = $nuevafecha = strtotime( '+1 second', strtotime ('-1 year',strtotime($permanence['commitment_date'])));
+                        break;
+                    case 'Biennially':
+                        $limit_date = $nuevafecha = strtotime( '+1 second', strtotime ('-2 year',strtotime($permanence['commitment_date'])));
+                        break;
+                    case 'Triennially':
+                        $limit_date = $nuevafecha = strtotime( '+1 second', strtotime ('-3 year',strtotime($permanence['commitment_date'])));
+                        break;
+                }
+                if ($limit_date < strtotime(date('Y-m-d'))){
+                  $this->assign('boton','1');
+                } else {
+                  $this->assign('boton','0');
+                }
+                $this->assign('permanence', $permanence['commitment_date']);
+            }else{
+                $this->assign('boton','1');
+                $this->assign('permanence', '');
+            }
+            {/php}
+            {if $boton == 1}
+              <p>
+                <a href="{$ca_url}clientarea&action=services&service={$service.id}&cid={$service.category_id}&cancel" class="default-button">{$lang.cancelrequest}</a>
+                {if $service.status == 'Active' and $service.custom and $service.name|stripos:"backup" !== false and ! $showupgrades}
+                  <a href="{$smarty.server.REQUEST_URI}&make=upgrades&upgradetarget=config" class="default-button">{$lang.Upgrade}</a>
+                {/if}
+              </p>
+            {/if}
+            {if $permanence}
+              <div class="tstitle">
+                  <h5>{$lang.permanence_label} {$permanence|dateformat:$date_format}</h5>
+              </div>
+            {/if}
+        </div>
+      </div><!--formwrap-->
+
+      {if $addons}
+        <div class="formwrap fw2 pnl">
+          <div class="wbox">
+            <div class="tstitle">
+              <h3>Addons</h3>
+            </div>
+
+            <div class="wbox_content">
+              <table width="100%" cellspacing="0" cellpadding="0" border="0" class="checker">
+
+                <tr><td colspan="2" style="border:none">
+
+
+                  <table cellspacing="0" cellpadding="0" border="0" width="100%" class="styled">
+                    <colgroup class="firstcol"></colgroup>
+                    <colgroup class="alternatecol"></colgroup>
+                    <colgroup class="firstcol"></colgroup>
+                    <colgroup class="alternatecol"></colgroup>
+
+                    <tbody>
+                      <tr>
+                        <th width="40%" align="left">{$lang.addon}</th>
+                        <th align="left">{$lang.price}</th>
+                        <th>{$lang.nextdue}</th>
+                        <th >{$lang.status}</th>
+
+                      </tr>
+                      {foreach from=$addons item=addon name=foo}
+                        <tr {if $smarty.foreach.foo.index%2 == 0}class="even"{/if}>
+                          <td>{if $lang[$addon.name]}{$lang[$addon.name]}{else}{$addon.name}{/if}
+                            {if $addon.info && $addon.status == 'Active'}<a href="" onclick="showAddonInfo(this,{$addon.id}); return false;" style="color: red; font-size: 11px">{$lang.moreinfo}</a>{/if}</td>
+                          <td>{$addon.recurring_amount|price:$currency}</td>
+                          <td align="center">{$addon.next_due|dateformat:$date_format}</td>
+                          <td align="center" ><span class="{$addon.status}">{$lang[$addon.status]}</span></td>
+
+                        </tr>
+                        {if $addon.info && $addon.status == 'Active'}
+                          <tr class="addoninfo_r{$addon.id} {if $smarty.foreach.foo.index%2 == 0} even{/if}" style="display:none">
+                            <td colspan="4"> <div style="padding: 10px">
+                              {$addon.info|replace:'"':"'"|nl2br}</div>
+                            </td>
+                          </tr>
+                        {/if}
+                      {/foreach}
+                    </tbody>
+
+                  </table>
+
+                  {if $cid == $globals.products_config.license.category_id && $service.id == $globals.products_config.backup_adv_license.id}
+                    <input type="button" name="btn" value="{$lang.license_upgrade}" onclick="window.location = '?cmd=cart&cat_id=addons&account_id={$service.id}';" />
+                  {/if}
+
+                </td></tr>
+              </table>
+            </div>
+          </div>
+          <script type="text/javascript">
+           {literal}
+           function showAddonInfo(elem,id) {
+             if($('.addoninfo_r'+id).hasClass('shown')) {
+               $('.addoninfo_r'+id).removeClass('shown').hide();
+               $(elem).html('{/literal}{$lang.moreinfo}{literal}');}
+             else {
+               $('.addoninfo_r'+id).addClass('shown').show();
+               $(elem).html('{/literal}{$lang.hide}{literal}');
+             }
+           }
+           {/literal}
+          </script>
+                {elseif $haveaddons && $service.status!='Fraud' && $service.status!='Cancelled' && $service.status != 'Terminated' && $service.status != 'Suspended'}
+          <div class="wbox">
+            <div class="wbox_header">
+              <strong>{$lang.accaddons|capitalize}</strong>
+            </div>
+            <div class="wbox_content">
+              {$service.id|string_format:$lang.clickaddaddons}
+            </div>
+          </div>
+      {/if}
+        </div>
+  {/if}
+
+{else}
+
+  {php}
+  if (!isset($_SESSION['AppSettings']['login']['contact_id'])) {
+      // Normal users (no contacts) doesn't have the `contact_id` field in the `login` array
+      $category_id = $this->get_template_vars()['cid'];
+      var_dump($category_id);
+      $allowed = true;
+  } else {
+      $contact_id = $_SESSION['AppSettings']['login']['contact_id'];
+      $category_id = $this->get_template_vars()['cid'];
+      var_dump($category_id);
+      $gr = HBRegistry::singleton()->getObject("other/gigasrol");
+      $permissions = $gr->getContactHostbillPermissions($contact_id);
+      $allowed = $gr->canAccessProductCategory($contact_id, $category_id);
+  }
+  if (!$allowed) {
+      Engine::singleton()->addError('noprivileges');
+      hbm_redirect("clientarea/services");
+  }
+  {/php}
+  {if $services}
+    {if $custom_template}
+      {* <!-- ÑAPA TEMPORAL --> *}
+      {if $services|@count gt 1}
+        {include file="client_list.tpl"}
+      {else}
+        {include file="client_list.tpl"}
+      {/if}
+      {*{include file=$custom_template}*}
+    {else}
+      <a href="{$ca_url}clientarea&amp;action=services&amp;cid={$cid}" id="currentlist" style="display:none" updater="#updater"></a>
+      <div class="tablewrap">
+        <h2>{if $services[0].catname == 'Licencias'}{$lang.licenses}{elseif $services[0].product_id == $globals.products_config.vlan.id}{$lang.vlans_service_name}{else}{$services[0].catname}{/if}</h2>
+        <table class="data">
+          <colgroup class="firstcol"></colgroup>
+          <colgroup class="alternatecol"></colgroup>
+          <colgroup class="firstcol"></colgroup>
+          <colgroup class="alternatecol"></colgroup>
+          <colgroup class="firstcol"></colgroup>
+          <colgroup class="alternatecol"></colgroup>
+          <thead>
+            <tr>
+              <th><a href="{$ca_url}clientarea&amp;action={$action}&amp;cid={$cid}&amp;orderby=name|ASC"  class="sortorder">{$lang.service}</a></th>
+              {if $cid==$globals.products_config.vlan.category_id}
+                <th><a href="#">{$lang.Location}</a></th>
+              {/if}
+              {if $action=='vps'}
+                <th width="70"><a href="{$ca_url}clientarea&amp;action={$action}&amp;cid={$cid}&amp;orderby=domain|ASC"  class="sortorder">{$lang.hostname}</a></th>
+              {else}
+                <th width="70"><a href="{$ca_url}clientarea&amp;action={$action}&amp;cid={$cid}&amp;orderby=total|ASC"  class="sortorder">{$lang.price}</a></th>
+              {/if}
+              {if $action=='vps'}
+                <th width="90">{$lang.ipadd}</th>
+              {else}
+                <th width="90"><a href="{$ca_url}clientarea&amp;action={$action}&amp;cid={$cid}&amp;orderby=billingcycle|ASC"  class="sortorder">{$lang.bcycle}</a></th>
+              {/if}
+
+              <th><a href="{$ca_url}clientarea&amp;action={$action}&amp;cid={$cid}&amp;orderby=status|ASC"  class="sortorder">{$lang.status}</a></th>
+              <th width="113"><a href="{$ca_url}clientarea&amp;action={$action}&amp;cid={$cid}&amp;orderby=next_due|ASC"  class="sortorder">{$lang.nextdue}</a>
+              </th>
+              <th width="20"></th>
+            </tr>
+          </thead>
+          <tbody id="updater">
+            {include file='ajax.services.tpl'}
+          </tbody>
+        </table>
+      </div>
+    {/if}
+    <table class="services-table">
+      <tr>
+        {if $cid}
+          {if $cid == $globals.products_config.vlan.category_id}
+            {php}
+            $hapi = new GApiWrapper();
+            $accounts = $hapi->getClientAccounts(array('id' => $_SESSION['AppSettings']['login']['id']));
+            foreach ($accounts['accounts'] as $account) {
+              if (stripos($account['name'], 'gigas') and $account['status'] == 'Active') {
+                $this->assign('dc_account_id', $account['id']);
+                break;
+              }
+            }
+            {/php}
+            {if $dc_account_id}
+              <td>
+                <form id="config-vlan" method="post" action="?/clientarea/services/cloud-datacenter/{$dc_account_id}/&widget=b_vlans">
+                  <input type="submit" value="{$lang.vlans_service_manage}">
+                </form>
+              </td>
+            {/if}
+          {/if}
+          <td>
+            {foreach from=$offer item=oo}
+              {if $cid==$oo.id && $oo.visible=='1'}<form id="add-vlan" method="{if $cid == 1}get{else}post{/if}" action="{if $cid == 5}{$ca_url}cart/cloud-datacenter/{elseif $cid == 14}{$ca_url}cart/load-balancer/{elseif $cid == 1}{$lang.langchange}/cloud-vps#vps-planes{else}{$ca_url}cart&cat_id={$cid}{/if}"><input type="submit" value="{$lang.Add} {if $services[0].product_id == $globals.products_config.vlan.id}{$lang.vlans_service_name}{else}{$oo.name}{/if}" />{securitytoken}</form>{/if}
+            {/foreach}
+        {/if}
+
+          </td>
+      </tr>
+    </table>
+
+    {if $dnsmanagement == 'on'  && $action=='vps'}
+    </div>	</div>
+    {/if}
+
+  {else}
+
+    {if $cid}
+      {foreach from=$offer item=oo}
+        {if $cid==$oo.id && $oo.visible=='1'}
+
+            <div class="tablewrap">
+              <h2>{$lang.services} - {$opdetails.name}</h2>
+              <table class="data">
+                <colgroup class="firstcol"></colgroup>
+                <colgroup class="alternatecol"></colgroup>
+                <colgroup class="firstcol"></colgroup>
+                <colgroup class="alternatecol"></colgroup>
+                <colgroup class="firstcol"></colgroup>
+                <colgroup class="alternatecol"></colgroup>
+                <thead>
+                  <tr>
+                    <th><a href="{$ca_url}clientarea&amp;action={$action}&amp;cid={$cid}&amp;orderby=name|ASC"  class="sortorder">{$lang.service}</a></th>
+                    {if $cid==$globals.products_config.vlan.category_id}
+                      <th><a href="#">{$lang.Location}</a></th>
+                    {/if}
+                    {if $action=='vps'}
+                      <th width="70"><a href="{$ca_url}clientarea&amp;action={$action}&amp;cid={$cid}&amp;orderby=domain|ASC"  class="sortorder">{$lang.hostname}</a></th>
+                    {else}
+                      <th width="70"><a href="{$ca_url}clientarea&amp;action={$action}&amp;cid={$cid}&amp;orderby=total|ASC"  class="sortorder">{$lang.price}</a></th>
+                    {/if}
+                    {if $action=='vps'}
+                      <th width="90">{$lang.ipadd}</th>
+                    {else}
+                      <th width="90"><a href="{$ca_url}clientarea&amp;action={$action}&amp;cid={$cid}&amp;orderby=billingcycle|ASC"  class="sortorder">{$lang.bcycle}</a></th>
+                    {/if}
+
+                    <th><a href="{$ca_url}clientarea&amp;action={$action}&amp;cid={$cid}&amp;orderby=status|ASC"  class="sortorder">{$lang.status}</a></th>
+                    <th width="113"><a href="{$ca_url}clientarea&amp;action={$action}&amp;cid={$cid}&amp;orderby=next_due|ASC"  class="sortorder">{$lang.nextdue}</a>
+                    </th>
+                    <th width="20"></th>
+                  </tr>
+                </thead>
+
+                <tbody id="updater">
+                  <tr>
+                    <td colspan=6>{$lang.nothing}</td>
+                 </tr>
+                </tbody>
+              </table>
+            </div>
+            <table class="services-table">
+              <tbody>
+                <tr>
+                  <td>
+                    {if !isset($clientdata.contact_id) || isset($clientdata.privileges.billing.orders)}
+                      <form method="{if $cid == 1}get{else}post{/if}"
+                            action="{if $cid == 5}{$ca_url}cart/cloud-datacenter/{elseif $cid == 14}{$ca_url}cart/load-balancer/{elseif $cid == 1}{$lang.langchange}/cloud-vps#vps-planes{else}{$ca_url}cart&cat_id={$cid}{/if}">
+                        <input type="submit" value="{$lang.Add} {$oo.name}" />{securitytoken}
+                      </form>
+                    {/if}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+        {/if}
+      {/foreach}
+    {else}
+      {$lang.nothing}&nbsp;
+    {/if}
+  {/if}
+{/if}

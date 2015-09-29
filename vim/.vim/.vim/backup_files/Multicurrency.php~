@@ -1,0 +1,1532 @@
+<?php
+
+require_once dirname(__FILE__) . "/../gigasutils/libs/Hostbill.php";
+
+
+class Multicurrency
+{
+
+    public static $CYCLES = array(
+       'Triennially' => 't',
+       'Biennially' => 'b',
+       'Annually' => 'a',
+       'Semi-Annually' => 's',
+       'Quarterly' => 'q',
+       'Monthly' => 'm',
+       'Weekly' => 'w',
+       'Daily' => 'd',
+       'Hourly' => 'h',
+    );
+
+    public static $CYCLE_DAYS = array(
+        'h' => 0,
+        'd' => 1,
+        'w' => 7,
+        'm' => 30,
+        'q' => 120,
+        's' => 180,
+        'a' => 360,
+        'b' => 720,
+        't' => 1080,
+    );
+
+    public function __construct()
+    {
+        $this->details = null;
+        $this->db = Engine::singleton()->getObject("db");
+        $this->api = new HostbillApi();
+        $this->currency_id = 0;
+        $this->currency_code = 'EUR';
+        $this->country = 'ES';
+        $this->cart = null;
+    }
+
+    public function calculatePercent($subtotal, $percent)
+    {
+        return (floatval($subtotal) * $percent) / 100.00;
+    }
+
+    public function enabled()
+    {
+        $mcpmodule = ModuleFactory::getModule("Other", "class.gigasmcp.php");
+        return $mcpmodule->enabled();
+    }
+
+    private function getDiscount($coupon, $total = 0)
+    {
+        $q = $this->db->prepare("SELECT * FROM hb_coupons ".
+                                " WHERE code = ? ORDER BY id DESC LIMIT 1");
+        $q->execute(array($coupon));
+        $cProps = $q->fetch(PDO::FETCH_ASSOC);
+        $q->closeCursor();
+
+        $type = 'fixed';
+        $amount = 0;
+        $recurring = false;
+
+        if(!empty($cProps))
+        {
+            $recurring = ($cProps['cycle'] == 'recurring');
+            $type = $cProps['type'];
+
+            if($cProps['type'] == 'percent')
+            {
+                $amount = $this->calculatePercent($total, $cProps['value']);
+            }
+            elseif($cProps['type'] == 'fixed')
+            {
+                $amount = $cProps['value'];
+            }
+        }
+
+        // Returns the amount (not a percentage) and the type of discount
+        return array('amount' => $amount, 'recurring' => $recurring, 'type' => $type);
+    }
+
+    public function setLocales($template_vars=null)
+    {
+        if(isset($_SESSION['AppSettings']['cartCurrency']))
+        {
+            $this->currency_code = null;
+            $this->currency_id = $_SESSION['AppSettings']['cartCurrency'];
+        }
+        elseif(isset($template_vars['clientdata']['currency_id']))
+        {
+            $this->currency_code = null;
+            $this->currency_id = $template_vars['clientdata']['currency_id'];
+        }
+        elseif(isset($template_vars['currency']['code']))
+        {
+            $this->currency_code = $template_vars['currency']['code'];
+            $q = $this->db->prepare("SELECT id FROM hb_currencies WHERE code = ?");
+            $q->execute(array($this->currency_code));
+            $d = $q->fetch(PDO::FETCH_ASSOC);
+            $q->closeCursor();
+            if(!empty($d))
+            {
+                $this->currency_id = $d['id'];
+            }
+            else
+            {
+                $this->currency_id = null;
+            }
+        }
+        if(isset($_SERVER['GEOIP_COUNTRY_CODE']))
+        {
+            $this->country = $_SERVER['GEOIP_COUNTRY_CODE'];
+        }
+        else
+        {
+            $this->country = null;
+        }
+    }
+
+    public function setCurrency($currency_id=0)
+    {
+        $this->currency_id = $currency_id;
+        $this->currency_code = null;
+        $this->country = null;
+    }
+
+    public function getProductPrice($productId, $cycle='m')
+    {
+        if($cycle == 'once') $cycle='m';
+
+        if(!is_null($this->currency_id) and $this->currency_id != 0)
+        {
+            $q = $this->db->prepare("SELECT price, setup_price as setup" .
+                                    " FROM gigas_global_productprice gpp " .
+                                    " JOIN hb_currencies hbc ON gpp.currency_id = hbc.id AND hbc.id = ? " .
+                                    " WHERE product_id = ? AND cycle = ?");
+            $q->execute(array($this->currency_id, $productId, $cycle));
+            $price_info = $q->fetch(PDO::FETCH_ASSOC);
+            $q->closeCursor();
+        }
+        elseif(!is_null($this->currency_code) and $this->currency_code != 'EUR')
+        {
+            $q = $this->db->prepare("SELECT id FROM hb_currencies WHERE code = ?");
+            $q->execute(array($this->currency_code));
+            $d = $q->fetch(PDO::FETCH_ASSOC);
+            $q->closeCursor();
+            if(!empty($d))
+            {
+                $this->currency_id = $d['id'];
+                return $this->getProductPrice($productId, $cycle);
+            }
+            $price_info = null;
+        }
+        else
+        {
+            $q = $this->db->prepare("SELECT " . $cycle . " as price, " . $cycle . "_setup as setup " .
+                                    " FROM hb_common " .
+                                    " WHERE rel = 'Product' AND id = ?");
+            $q->execute(array($productId));
+            $price_info = $q->fetch(PDO::FETCH_ASSOC);
+            $q->closeCursor();
+        }
+
+        if(empty($price_info))
+        {
+            return array('price' => '0.00', 'setup' => '0.00');
+            return array('price' => 'TBC', 'setup' => 'TBC');
+        }
+
+        return $price_info;
+    }
+
+    public function getAddonPrice($addonId, $cycle='m')
+    {
+        if($cycle == 'once') $cycle='m';
+
+        if(!is_null($this->currency_id) and $this->currency_id != 0)
+        {
+            $q = $this->db->prepare("SELECT price, setup_price as setup " .
+                                    " FROM gigas_global_addonprice gpp " .
+                                    " JOIN hb_currencies hbc ON gpp.currency_id = hbc.id AND hbc.id = ? " .
+                                    " WHERE addon_id = ? AND cycle = ?");
+            $q->execute(array($this->currency_id, $addonId, $cycle));
+            $price_info = $q->fetch(PDO::FETCH_ASSOC);
+            $q->closeCursor();
+        }
+        elseif(!is_null($this->currency_code) and $this->currency_code != 'EUR')
+        {
+            $q = $this->db->prepare("SELECT id FROM hb_currencies WHERE code = ?");
+            $q->execute(array($this->currency_code));
+            $d = $q->fetch(PDO::FETCH_ASSOC);
+            $q->closeCursor();
+            if(!empty($d))
+            {
+                $this->currency_id = $d['id'];
+                return $this->getAddonPrice($addonId, $cycle);
+            }
+            $price_info = null;
+        }
+        else
+        {
+            $q = $this->db->prepare("SELECT " . $cycle . " as price, " . $cycle . "_setup as setup " .
+                                    " FROM hb_common " .
+                                    " WHERE rel = 'Addon' AND id = ?");
+            $q->execute(array($addonId));
+            $price_info = $q->fetch(PDO::FETCH_ASSOC);
+            $q->closeCursor();
+        }
+
+        if(empty($price_info))
+        {
+            return array('price' => 'TCB', 'setup' => 'TCB');
+        }
+
+        return $price_info;
+    }
+
+    public function getConfigItemPrice($configId, $cycle="m")
+    {
+        if($cycle == 'once') $cycle='m';
+        $currency_id = null;
+
+        # try fixing currency_id if it's not set
+        if(is_null($this->currency_id) and !is_null($this->currency_code) and $this->currency_code != 'EUR')
+        {
+            $q = $this->db->prepare("SELECT id FROM hb_currencies WHERE code = ?");
+            $q->execute(array($this->currency_code));
+            $d = $q->fetch(PDO::FETCH_ASSOC);
+            $q->closeCursor();
+            if(!empty($d)) {
+                $this->currency_id = $d['id'];
+            }
+            else {
+                return array('price' => 'TCB', 'setup' => 'TCB');
+            }
+
+        }
+
+        if(!is_null($this->currency_id) and $this->currency_id != 0)
+        {
+            $currency_id = $this->currency_id;
+        }
+
+        if ($currency_id != null) {
+            $q = $this->db->prepare("SELECT price, setup_price as setup " .
+                                    " FROM gigas_global_configprice gpc " .
+                                    " JOIN hb_currencies hbc ON gpc.currency_id = hbc.id AND hbc.id = ? " .
+                                    " WHERE config_option_id = ? AND cycle = ?");
+            $q->execute(array($currency_id, $configId, $cycle));
+            $price_info = $q->fetch(PDO::FETCH_ASSOC);
+            $q->closeCursor();
+        }
+        else {
+            $q = $this->db->prepare("SELECT " . $cycle . " as price, " . $cycle . "_setup as setup " .
+                                    " FROM hb_common " .
+                                    " WHERE rel = 'Config' AND id = ?");
+            $q->execute(array($configId));
+            $price_info = $q->fetch(PDO::FETCH_ASSOC);
+            $q->closeCursor();
+        }
+
+        if(empty($price_info))
+        {
+            return array('price' => 'TCB', 'setup' => 'TCB');
+        }
+
+        return $price_info;
+    }
+
+    private function modify_custom(&$custom) {
+        foreach($custom as $cat_id=>$category) {
+            foreach($category['items'] as $config_id => $config_item) {
+                $id = isset($config_item['id']) ? $config_item['id']:$config_id;
+                $c = $this->getCycleByBillingcycle($config_item['recurring']);
+                foreach(array_values(self::$CYCLES) as $pcycle) {
+                    $item_price = $this->getConfigItemPrice($id, $pcycle);
+                    $custom[$cat_id]['items'][$config_id][$pcycle] = $item_price['price'];
+                    $custom[$cat_id]['items'][$config_id][$pcycle . '_setup'] = $item_price['setup'];
+                    if ( strcmp($c, $pcycle)===0) {
+                        $custom[$cat_id]['items'][$config_id]['price'] = $item_price['price'];
+                        $custom[$cat_id]['items'][$config_id]['setup'] = $item_price['setup'];
+                        $custom[$cat_id]['items'][$config_id]['fee'] = $item_price['price'] + $item_price['setup'];
+                        $custom[$cat_id]['items'][$config_id]['_price'] = $item_price['price'];
+                        $custom[$cat_id]['items'][$config_id]['_setup'] = $item_price['setup'];
+                        $custom[$cat_id]['items'][$config_id]['_fee'] = $item_price['price'] + $item_price['setup'];
+                    }
+                }
+            }
+        }
+        return $custom;
+    }
+
+
+    public function convert($template_vars=null)
+    {
+        #file_put_contents('/tmp/template_vars.txt', print_r($template_vars, true));
+
+        /*
+         * $template_vars = array(
+         * ...
+         * 'products' / 'product'
+         * 'tax'
+         * 'subtotal'
+         * 'currency' : Le cambiamos el rate a 1 para poder usar la funcion price de smarty
+         * 'contents' : 0 => dc, vps, licencias, balanceador, etc // product = contents[0]
+         *              1 => config options
+         *              2 => dominios // ¿?
+         *              3 => addons   // product no existe
+         * 'client'
+         * ...
+         */
+
+        #
+        # Seteamos las locale desde las variables de plantilla
+        #
+        $this->setLocales($template_vars);
+
+        #
+        # Si estamos en la moneda por defecto no tocamos nada
+        #
+        if($this->currency_id == 0 or ! $this->enabled())
+        {
+            $_SESSION['GigasCart'] = null;
+            unset($_SESSION['GigasCart']);
+            return $template_vars;
+        }
+        $_SESSION['template_vars'] = $template_vars;
+
+        $total = 0;              // El total de la factura (con iva)
+        $subtotal = 0;           // El total de la factura (sin iva)
+        $total_recurring = 0;    // El precio del producto contratado (con iva)
+        $subtotal_recurring = 0; // El precio del producto contratado (sin iva)
+        $taxed1 = 0;             // Resultado de aplicar el impuesto 1 al subtotal
+        $taxed2 = 0;             // Resultado de aplicar el impuesto 2 a taxed1
+
+        $cycle = 'm';            // Ciclo de facturación
+
+        $products = null;
+        $domains = null;
+        $product = null;
+        $addons = null;
+        $tax = null;
+
+        $discount = null;
+        $discount_total = 0;
+        $credit = 0;
+
+        $this->cart = null;
+
+        $this->setLocales($template_vars);
+        $return_array = array('mu_currency_id' => $this->currency_id);
+        $this->cart['currency_id'] = $this->currency_id;
+
+        //
+        // Si existe addons le pegamos cambiazo a los precios de todos los addons
+        //
+        if(isset($template_vars['addons']) and !empty($template_vars['addons']) and isset($template_vars['addons']['addons']))
+        {
+            $return_array['addons'] = $template_vars['addons'];
+
+            foreach($return_array['addons']['addons'] as $k=>$addon)
+            {
+                foreach(array_values(self::$CYCLES) as $acycle)
+                {
+                    $c_price = $this->getAddonPrice($addon['id'], $acycle);
+                    $return_array['addons']['addons'][$k][$acycle] = $c_price['price'];
+                    $return_array['addons']['addons'][$k][$acycle . '_setup'] = $c_price['setup'];
+                }
+            }
+        }
+
+        //
+        // Si existe products le pegamos cambiazo a los precios de todos los productos
+        //
+        if (isset($template_vars['products']) and !empty($template_vars['products'])) {
+           $products = $template_vars['products'];
+           foreach($products as $k => $pro_duct) {
+              foreach(array_values(self::$CYCLES) as $pcycle) {
+                  $product_price = $this->getProductPrice($pro_duct['id'], $pcycle);
+                  $products[$k][$pcycle] = $product_price['price'];
+                  $products[$k][$pcycle . '_setup'] = $product_price['setup'];
+              }
+           }
+           
+        }
+        // tienen config options?
+        if ((isset($template_vars['custom'])) and !empty($template_vars['custom'])) {
+        //$template_vars['custom'] = 
+            $this->modify_custom($template_vars['custom']);
+        }
+        if ((isset($template_vars['service']['custom'])) and !empty($template_vars['service']['custom'])) {
+        //$template_vars['service']['custom'] = 
+            $this->modify_custom($template_vars['service']['custom']);
+        }
+        if ((isset($template_vars['fieldupgrades'])) and !empty($template_vars['fieldupgrades'])) {
+        //$template_vars['fieldupgrades'] = 
+            $this->modify_custom($template_vars['fieldupgrades']);
+        }
+        //
+        // Si existe upgrades le pegamos cambiazo a los precios de todos los productos
+        //
+        if(isset($template_vars['upgrades']) and !empty($template_vars['upgrades']))
+        {
+            $upgrades = $template_vars['upgrades'];
+            foreach($upgrades as $k => $up_grade)
+            {
+                foreach(array_values(self::$CYCLES) as $pcycle)
+                {
+                    $upgrade_price = $this->getProductPrice($up_grade['id'], $pcycle);
+                    $upgrades[$k][$pcycle] = $upgrade_price['price'];
+                    $upgrades[$k][$pcycle . '_setup'] = $upgrade_price['setup'];
+                }
+            }
+        }
+
+        //
+        // Si existe product le pegamos cambiazo a los precios de ese producto
+        //
+        if(isset($template_vars['product']) and !empty($template_vars['product']))
+        {
+            $product = $template_vars['product'];
+            foreach(array_values(self::$CYCLES) as $pcycle)
+            {
+                $product_price = $this->getProductPrice($product['id'], $pcycle);
+                $product[$pcycle] = $product_price['price'];
+                $product[$pcycle . '_setup'] = $product_price['setup'];
+            }
+        }
+
+        $item_price = 0;
+        $account_firstpayment = 0;
+        $account_total = 0;
+        $order_total = 0;
+
+        $taxable = false;
+
+        //
+        // Compra de producto
+        // ==================
+        //
+        // Partimos de la base de que solo se puede comprar 1 producto a la vez
+        //
+        if(isset($template_vars['contents'][0]) and !empty($template_vars['contents'][0]))
+        {
+            $contents0 = $template_vars['contents'][0];
+            $cycle = $contents0['recurring'];
+            $product_price = $this->getProductPrice($contents0['id'], $cycle);
+            $contents0['price'] = $product_price['price'];
+            $contents0['setup'] = $product_price['setup'];
+
+            if($contents0['tax'] == 1) $taxable = true;
+
+            //
+            // Aplicamos el cupon
+            //
+            $item_price = $product_price['price'];
+            $account_firstpayment = $item_price + $product_price['setup'];
+            $order_total = $item_price + $product_price['setup'];
+            $account_total = $item_price;
+
+            if(isset($template_vars['subtotal']['coupon']))
+            {
+                $coupon = $template_vars['subtotal']['coupon'];
+                $product_discount = $this->getDiscount($coupon, $item_price);
+                $discount_total = $product_discount['amount'];
+                $account_total = ($item_price > $product_discount['amount']) ? $item_price - $product_discount['amount'] : 0;
+                $item_price = $account_total + $product_price['setup'];
+
+                if($product_discount['recurring'])
+                {
+                    $account_firstpayment = $item_price;
+                    $order_total = $item_price;
+                }
+                else
+                {
+                    $account_firstpayment = $item_price;
+                    $order_total = $item_price;
+                    $account_total = $product_price['price'];
+                }
+
+                if($product_discount['type'] == 'fixed')
+                {
+                    $remaining_discount = ($product_discount['amount'] > $product_price['price']) ? $product_discount['amount'] - $product_price['price'] : 0;
+                    $remaining_discount_recurring = $product_discount['recurring'];
+                }
+            }
+            else
+            {
+                $item_price += $product_price['setup'];
+            }
+
+            $this->cart['items'][] = array('type' => 'Hosting', 'product_id' => $contents0['id'], 'price' => $item_price);
+            $this->cart['account']['firstpayment'] = $account_firstpayment;
+            $this->cart['account']['total'] = $account_total;
+            $this->cart['order']['total'] = $order_total;
+
+            $subtotal_recurring += $account_total;
+        }
+
+        //
+        // Compra de dominios
+        // ==================
+        //
+        if(isset($template_vars['contents'][2]) and !empty($template_vars['contents'][2]))
+        {
+            $contents2 = $template_vars['contents'][2];
+            foreach($contents2 as $k=>$domain)
+            {
+                $type = 'Domain '. ucfirst(strtolower($domain['action']));
+                $dom_explode = explode('.', $domain['name'], 2);
+                $tld = ".".$dom_explode[1];
+                $domain_prices = $this->getDomainPrices($tld, $domain['period']);
+                $item_price = $domain_prices[$domain['action']];
+
+                $domain_recurring_amount = $item_price;
+
+                $contents2[$k]['price'] = $item_price;
+
+                //
+                // Aplicamos el cupón
+                //
+                if(isset($remaining_discount) and $remaining_discount > 0)
+                {
+                    $item_price = ($item_price > $remaining_discount) ? $item_price - $remaining_discount : 0;
+                    $order_total += $item_price;
+                    $remaining_discount = ($remaining_discount > $item_price) ? $remaining_discount - $item_price : 0;
+                    if($remaining_discount_recurring)
+                    {
+                        $domain_recurring_amount = $item_price;
+                    }
+                }
+                elseif(!isset($remaining_discount) and isset($template_vars['subtotal']['coupon']))
+                {
+                    $coupon = $template_vars['subtotal']['coupon'];
+                    $domain_discount = $this->getDiscount($coupon, $item_price);
+                    $discount_total += $domain_discount['amount'];
+
+                    $item_price = ($item_price > $domain_discount['amount']) ? $item_price - $domain_discount['amount'] : 0;
+                    $order_total += $item_price;
+
+                    if($domain_discount['recurring'])
+                    {
+                        $domain_recurring_amount = $item_price;
+                    }
+                }
+                else
+                {
+                    $order_total += $item_price;
+                }
+
+                $domain_firstpayment = $item_price;
+
+                $this->cart['items'][] = array('type' => $type, 'domain_name' => $domain['name'], 'price' => $item_price);
+                $this->cart['domain'][$domain['name']]['firstpayment'] = $domain_firstpayment;
+                $this->cart['domain'][$domain['name']]['recurring_amount'] = $domain_recurring_amount;
+
+                #$subtotal_recurring += $domain_recurring_amount;
+            }
+            $this->cart['order']['total'] = $order_total;
+        }
+
+        //
+        // Compra de addon
+        // ===============
+        //
+        // Partimos de la base de que solo se puede comprar 1 producto a la vez
+        //
+        if(isset($template_vars['contents'][3]) and !empty($template_vars['contents'][3]))
+        {
+            $addons = $template_vars['contents'][3];
+            list($addonId, $addon) = each($addons);
+            $cycle = $addon['recurring'];
+            $addon_price = $this->getAddonPrice($addon['id'], $cycle);
+
+            $addons[$addon['id']]['price'] = $addon_price['price'];
+            $addons[$addon['id']]['setup'] = $addon_price['setup'];
+
+            $item_price = $addon_price['price'];
+
+            if(date('j') > 1 and !empty($addon['prorata_amount']))
+            {
+                // Que pasaría si estuvieramos a 1 ¿? Hay que probarlo
+                $daily_price = number_format($item_price / date('t'), 8);
+                $rest = number_format(date('t') - date('j') + 1, 2);
+                $prorata_amount = number_format($daily_price * $rest, 2);
+                $addons[$addon['id']]['prorata_amount'] = $prorata_amount;
+                $item_price = $prorata_amount;
+            }
+
+            //
+            // Aplicamos cupon
+            //
+            $addon_setup_fee = $addon_price['setup'];
+            $addon_recurring_amount = $addon_price['price'];
+
+            if(isset($remaining_discount) and $remaining_discount > 0)
+            {
+                $item_price = ($item_price > $remaining_discount) ? $item_price - $remaining_discount : 0;
+                $order_total += $item_price;
+            }
+            elseif(!isset($remaining_discount) and isset($template_vars['subtotal']['coupon']))
+            {
+                $coupon = $template_vars['subtotal']['coupon'];
+                $addon_discount = $this->getDiscount($coupon, $item_price);
+                $discount_total = $addon_discount['amount'];
+
+                $item_price = ($item_price > $addon_discount['amount']) ? $item_price - $addon_discount['amount'] : 0;
+                $order_total += $item_price;
+
+                if($addon_discount['recurring'])
+                {
+                    $addon_discount = $this->getDiscount($coupon, $addon_price['price']);
+                    $addon_recurring_amount = ($addon_price['price'] > $addon_discount['amount']) ? $addon_price['price'] - $addon_discount['amount'] : 0;
+                }
+            }
+            else
+            {
+                $order_total += $item_price;
+            }
+
+            $this->cart['items'][] = array('type' => 'Addon', 'addon_id' => $addon['id'], 'price' => $item_price);
+            $this->cart['order']['total'] = $order_total;
+            $this->cart['addon']['setup_fee'] = $addon_setup_fee;
+            $this->cart['addon']['recurring_amount'] = $addon_recurring_amount;
+
+            $subtotal_recurring += $addon_recurring_amount; 
+        }
+
+        //
+        // config items
+        // ------------
+        //
+        // puede haber multiples config items aplicando a un producto, 
+        // pero no todos tienen precio
+        //
+
+
+        if (isset($template_vars['contents'][1]) and !empty($template_vars['contents'][1])) {
+            $contents1 = $template_vars['contents'][1];
+            $config_total = 0;
+            foreach ($contents1 as $cat_id => $category) {
+                $config_product_id = $template_vars['custom'][$cat_id]['product_id'];
+                foreach ($category as $config_id => $config_item) {
+                    if (!empty($config_item['price']) or !empty($config_item['setup'])) {
+                        $config_price = $this->getConfigItemPrice($config_id, $config_item['recurring']);
+                        $contents1[$cat_id][$config_id]['price'] = $config_price['price'];
+                        $contents1[$cat_id][$config_id]['setup'] = $config_price['setup'];
+                        $contents1[$cat_id][$config_id]['total'] = $config_price['price'] + $config_price['setup'];
+                        
+
+                        // prorateo si aplica
+                        $item_price = $config_price['price'];
+                        if(date('j') > 1 and !empty($config_item['prorata_amount'])) {
+                            // Que pasaría si estuvieramos a 1 ¿? Hay que probarlo
+                            $daily_price = number_format($item_price / date('t'), 8);
+                            $rest = number_format(date('t') - date('j') + 1, 2);
+                            $prorata_amount = number_format($daily_price * $rest, 2);
+                            $config_item['prorata_amount'] = $prorata_amount;
+                            $item_price = $prorata_amount;
+                        }
+                        
+                        //
+                        // Aplicamos cupon
+                        //
+                        $config_setup_fee = $config_price['setup'];
+                        $config_recurring_amount = $config_price['price'];
+                        
+                        if(isset($remaining_discount) and $remaining_discount > 0) {
+                            $item_price = ($item_price > $remaining_discount) ? $item_price - $remaining_discount : 0;
+                            $order_total += $item_price;
+                        }
+                        elseif(!isset($remaining_discount) and isset($template_vars['subtotal']['coupon'])) {
+                            $coupon = $template_vars['subtotal']['coupon'];
+                            $config_discount = $this->getDiscount($coupon, $item_price);
+                            $discount_total = $config_discount['amount'];
+                            
+                            $item_price = ($item_price > $config_discount['amount']) ? $item_price - $config_discount['amount'] : 0;
+                            if($config_discount['recurring']) {
+                                $config_discount = $this->getDiscount($coupon, $config_price['price']);
+                                $config_recurring_amount = ($config_price['price'] > $config_discount['amount']) ? $config_price['price'] - $config_discount['amount'] : 0;
+                            }
+                        }
+                        $config_total += $item_price + $config_setup_fee;
+                        $this->cart['items'][] = array('type' => 'Config', 'product_id' => $config_product_id, 'price' => $item_price);
+                        /* foreach($this->cart['items'] as $item) { */
+                        /*     if ($item['product_id'] == $config_product_id) { */
+                        /*         $item['price'] += $item_price; */
+                        /*     } */
+                        /* } */
+                        $this->cart['config'][$config['id']]['setup_fee'] = $config_setup_fee;
+                        $this->cart['config'][$config['id']]['recurring_amount'] = $config_recurring_amount;
+                        $this->cart['config'][$config['id']]['product_id'] = $config_product_id;
+                        $this->cart['config']['total'] = $config_total;
+                    }
+                }
+            }
+            $order_total += $config_total;
+
+            $this->cart['order']['total'] = $order_total;
+            
+            $subtotal_recurring += $config_recurring_amount;             
+
+
+        }
+
+
+
+        $subtotal = $this->cart['order']['total'];
+        $total = $subtotal;
+
+        //
+        // Aplicamos impuestos
+        // ===================
+        //
+        if($template_vars['client']['taxexempt'] == 0 and !empty($template_vars['tax']) and $subtotal > 0)
+        {
+            $total_recurring = $subtotal_recurring;
+
+            $tax = $template_vars['tax'];
+            if($tax['tax1'] != 0)
+            {
+                $taxed1 = $this->calculatePercent($subtotal, $tax['tax1']);
+                $total += $taxed1;
+
+                $taxed1_recurring = $this->calculatePercent($subtotal_recurring, $tax['tax1']);
+                $total_recurring += $taxed1_recurring;
+            }
+
+            if($tax['tax2'] != 0) // REVISAR ESTO PORQUE NO SE ESTÁ HACIENDO BIEN
+            {
+                $taxed2 = $this->calculatePercent($subtotal, $tax['tax2']);
+                $total += $taxed2;
+
+                $taxed2_recurring = $this->calculatePercent($subtotal_recurring, $tax['tax2']);
+                $total_recurring += $taxed2_recurring;
+            }
+        }
+
+        //
+        // Descontamos el crédito que tenga el cliente
+        //
+        // TODO: Hay que tener en cuenta que al cambiar el precio
+        //       cambia la cantidad a descontar del crédito del usuario
+        //
+        if(isset($template_vars['client']['credit']) and $template_vars['client']['credit'] > 0 and $total > 0)
+        {
+            $client_credit = $template_vars['client']['credit'];
+            $total_after_credit = ($subtotal > $client_credit) ? $total - $client_credit : '0.00';
+
+            $credit = $total - $total_after_credit;
+            $total = $total_after_credit;
+
+            $this->cart['remaining_credit'] = $client_credit - $credit;
+        }
+
+        //
+        // Preparamos el resultado
+        // =======================
+        //
+        if(!empty($template_vars['tax']))
+        {
+            if($discount_total > 0)
+            {
+                $tax['discount'] = $discount_total;
+            }
+            if($total > 0)
+            {
+                $tax['taxed1'] = $taxed1;
+                $tax['taxed2'] = $taxed2;
+            }
+            $tax['subtotal'] = $subtotal;
+            $tax['total'] = $total;
+            if($total_recurring > 0)
+            {
+                $tax['recurring'][$cycle] = $total_recurring;
+            }
+            $tax['credit'] = $credit;
+            $return_array['tax'] = $tax;
+
+            $this->cart['subtotal'] = $subtotal;
+            $this->cart['credit'] = $credit;
+            $this->cart['tax'] = $taxed1;
+            $this->cart['taxrate'] = $tax['tax1'];
+            $this->cart['tax2'] = $taxed2;
+            $this->cart['taxrate2'] = $tax['tax2'];
+            $this->cart['total'] = $total;
+        }
+
+        $this->cart['order']['total'] = $total;
+
+        if(!empty($template_vars['subtotal']))
+        {
+            $hb_subtotal = $template_vars['subtotal'];
+            if($discount_total > 0)
+            {
+                $hb_subtotal['discount'] = $discount_total;
+            }
+            $hb_subtotal['total'] = $subtotal;
+            if($subtotal_recurring > 0)
+            {
+                $hb_subtotal['recurring'][$cycle] = $subtotal_recurring;
+            }
+            $return_array['subtotal'] = $hb_subtotal;
+
+            $this->cart['recurring'] = $subtotal_recurring;
+        }
+
+        if(!empty($template_vars['currency']))
+        {
+            $return_array['currency'] = $template_vars['currency'];
+            $return_array['currency']['rate'] = 1; // Pasamos el ratio a 1 para que no toque los precios
+        }
+
+        if(!empty($template_vars['products']))
+        {
+            $return_array['products'] = $products;
+        }
+        
+        if(!empty($template_vars['custom'])) {
+            $return_array['custom'] = $template_vars['custom'];
+        }
+
+        if(!empty($template_vars['fieldupgrades'])) {
+            $return_array['fieldupgrades'] = $template_vars['fieldupgrades'];
+        }
+
+        if(!empty($template_vars['service'])) {
+            $return_array['service'] = $template_vars['service'];
+        }
+
+        if(!empty($template_vars['upgrades']))
+        {
+            $return_array['upgrades'] = $upgrades;
+        }
+
+        if(!empty($template_vars['product']))
+        {
+            $return_array['product'] = $product;
+        }
+
+        if(!empty($template_vars['contents']))
+        {
+            $return_array['contents'] = $template_vars['contents'];
+        }
+
+        if(!empty($template_vars['contents'][0]))
+        {
+            $return_array['contents'][0] = $contents0;
+        }
+
+        if(!empty($template_vars['contents'][1]))
+        {
+            $return_array['contents'][1] = $contents1;
+        }
+
+        if(!empty($template_vars['contents'][2]))
+        {
+            $return_array['contents'][2] = $contents2;
+        }
+
+        if(!empty($template_vars['contents'][3]))
+        {
+            $return_array['contents'][3] = $addons;
+        }
+
+        if(!empty($template_vars['cart_contents']))
+        {
+            $return_array['cart_contents'] = $return_array['contents'];
+        }
+
+        if(isset($_SESSION['Cart'][1]) and !empty($_SESSION['Cart'][1]) and isset($contents0))
+        {
+            $_SESSION['Cart'][1] = $contents0;
+        }
+
+        $_SESSION['GigasCart'] = $this->cart;
+
+        #file_put_contents('/tmp/cart.txt', print_r($this->cart, true));
+        #file_put_contents('/tmp/return_array.txt', print_r($return_array, true));
+        return $return_array;
+    }
+
+    public function convertUpgrade($template_vars=null)
+    {
+        #file_put_contents('/tmp/template_vars.txt', print_r($template_vars, true));
+
+        /*
+         * $template_vars = array(
+         * ...
+         * 'products' / 'product'
+         * 'tax'
+         * 'subtotal'
+         * 'currency' : Le cambiamos el rate a 1 para poder usar la funcion price de smarty
+         * 'contents' : product => producto que estamos upgradeando
+         * 'client'
+         * ...
+         */
+
+        #
+        # Seteamos las locale desde las variables de plantilla
+        #
+        $this->setLocales($template_vars);
+
+        #
+        # Si estamos en la moneda por defecto no tocamos nada
+        #
+        if($this->currency_id == 0 or ! $this->enabled())
+        {
+            $_SESSION['GigasCart'] = null;
+            unset($_SESSION['GigasCart']);
+            var_dump($template_vars);
+            die("hola");
+            return $template_vars;
+        }
+
+        die("adios");
+        $_SESSION['template_vars'] = $template_vars;
+
+        $total = 0;              // El total de la factura (con iva)
+        $subtotal = 0;           // El total de la factura (sin iva)
+        $total_recurring = 0;    // El precio del producto contratado (con iva)
+        $subtotal_recurring = 0; // El precio del producto contratado (sin iva)
+        $taxed1 = 0;             // Resultado de aplicar el impuesto 1 al subtotal
+        $taxed2 = 0;             // Resultado de aplicar el impuesto 2 a taxed1
+
+        $cycle = 'm';            // Ciclo de facturación
+
+        $products = null;
+        $product = null;
+        $tax = null;
+
+        $discount = null;
+        $discount_total = 0;
+        $credit = 0;
+
+        $this->cart = null;
+
+        $this->setLocales($template_vars);
+        $return_array = array('mu_currency_id' => $this->currency_id);
+        $this->cart['currency_id'] = $this->currency_id;
+
+        $item_price = 0;
+        $account_total = 0;
+        $order_total = 0;
+
+        $taxable = false;
+        //
+        // Upgrade de producto
+        // ==================
+        //
+        if(isset($template_vars['contents']['product']) and !empty($template_vars['contents']['product']))
+        {
+            $contents0 = $template_vars['contents']['product'];
+            $account = $this->api->getAccountDetails(array('id'=>$contents0['account_id']));
+            #$cycle = $this->getCycleByBillingcycle($contents0['billingcycle']);
+            $old_cycle = self::$CYCLES[$contents0['billingcycle']];
+            $cycle = $contents0['new_billing'];
+            $product_price = $this->getProductPrice($contents0['new_product_id'], $cycle);
+
+            $d1 = new DateTime(date('Y/m/d'));
+            $d2 = new DateTime($account['next_due']);
+            $interval = $d2->diff($d1);
+            $pr_interval = max(1, $interval->days);
+
+            if($contents0['tax'] == 1) $taxable = true;
+
+            $item_price = $product_price['price'] + $product_price['setup'];
+            $old_item_price = $account['total'];
+
+            $item_price_pr = ($item_price / self::$CYCLE_DAYS[$cycle]) * $pr_interval;
+            $old_item_price_pr = ($old_item_price / self::$CYCLE_DAYS[$old_cycle]) * $pr_interval;
+
+            $order_total = $item_price_pr - $old_item_price_pr;
+            $account_total = $product_price['price'];
+
+            if($template_vars['contents']['product']['charge'] > 0)
+            {
+                $contents0['new_value'] = $account_total;
+                $contents0['charge'] = $order_total;
+
+                $this->cart['items'][] = array('type' => 'Hosting', 'product_id' => $contents0['id'], 'price' => $item_price);
+                $this->cart['account']['total'] = $account_total;
+                $this->cart['order']['total'] = $order_total;
+
+                $subtotal_recurring += $account_total;
+            }
+
+            //
+            // Upgrade de config producto
+            // ==========================
+            //
+            if(isset($template_vars['contents']['config']) and 
+                !empty($template_vars['contents']['config']))
+            {
+                # De momento solo soporta 1 config extra de tipo qty
+                list($contents_config_id ,$contents_config) = each(
+                            array_filter($template_vars['contents']['config'], 
+                            function($a) { 
+                                return isset($a['new_qty']) and isset($a['old_qty']);
+                            })
+                         );
+
+                if($contents_config and $contents_config['charge'] > 0)
+                {
+                    $item_id = $contents_config['new_config_id'];
+                    $config_price = $this->getConfigItemPrice($item_id, $cycle);
+                    $item_price = $config_price['price'] + $config_price['setup'];
+                    $item_price_pr = ($item_price / self::$CYCLE_DAYS[$cycle]) * $pr_interval;
+
+                    $order_total = $item_price_pr * ($contents_config['new_qty'] - $contents_config['old_qty']);
+                    $account_total = $product_price['price'] * $contents_config['new_qty'];
+
+                    $contents_config['charge'] = $order_total;
+
+                    $this->cart['items'][] = array('type' => 'Upgrade', 'product_id' => $contents0['id'], 'price' => $item_price);
+                    $this->cart['account']['total'] = $account_total;
+                    $this->cart['order']['total'] = $order_total;
+
+                    $subtotal_recurring += $account_total;
+                    $template_vars['contents']['config'][$contents_config_id] = $contents_config;
+                }
+            }
+        }
+
+        $subtotal = $this->cart['order']['total'];
+        $total = $subtotal;
+
+        //
+        // Aplicamos impuestos
+        // ===================
+        //
+        if($template_vars['client']['taxexempt'] == 0 and !empty($template_vars['tax']) and $subtotal > 0)
+        {
+            $total_recurring = $subtotal_recurring;
+
+            $tax = $template_vars['tax'];
+            if($tax['tax1'] != 0)
+            {
+                $taxed1 = $this->calculatePercent($subtotal, $tax['tax1']);
+                $total += $taxed1;
+
+                $taxed1_recurring = $this->calculatePercent($subtotal_recurring, $tax['tax1']);
+                $total_recurring += $taxed1_recurring;
+            }
+
+            if($tax['tax2'] != 0) // REVISAR ESTO PORQUE NO SE ESTÁ HACIENDO BIEN
+            {
+                $taxed2 = $this->calculatePercent($subtotal, $tax['tax2']);
+                $total += $taxed2;
+
+                $taxed2_recurring = $this->calculatePercent($subtotal_recurring, $tax['tax2']);
+                $total_recurring += $taxed2_recurring;
+            }
+        }
+
+        //
+        // Descontamos el crédito que tenga el cliente
+        //
+        // TODO: Hay que tener en cuenta que al cambiar el precio
+        //       cambia la cantidad a descontar del crédito del usuario
+        //
+        $clientdata = $template_vars['clientdata'];
+
+        if(isset($clientdata) and isset($clientdata['credit']) and $clientdata['credit'] > 0 and $total > 0)
+        {
+            $client_credit = $clientdata['credit'];
+            $total_after_credit = ($subtotal > $client_credit) ? $total - $client_credit : '0.00';
+
+            $credit = $total - $total_after_credit;
+            $total = $total_after_credit;
+
+            $this->cart['remaining_credit'] = $client_credit - $credit;
+        }
+
+        //
+        // Preparamos el resultado
+        // =======================
+        //
+        if(!empty($template_vars['tax']))
+        {
+            if($discount_total > 0)
+            {
+                $tax['discount'] = $discount_total;
+            }
+            if($total > 0)
+            {
+                $tax['taxed1'] = $taxed1;
+                $tax['taxed2'] = $taxed2;
+            }
+            $tax['subtotal'] = $subtotal;
+            $tax['total'] = $total;
+            if($total_recurring > 0)
+            {
+                $tax['recurring'][$cycle] = $total_recurring;
+            }
+            $tax['credit'] = $credit;
+            $return_array['tax'] = $tax;
+
+            $this->cart['subtotal'] = $subtotal;
+            $this->cart['credit'] = $credit;
+            $this->cart['tax'] = $taxed1;
+            $this->cart['taxrate'] = $tax['tax1'];
+            $this->cart['tax2'] = $taxed2;
+            $this->cart['taxrate2'] = $tax['tax2'];
+            $this->cart['total'] = $total;
+        }
+
+        $this->cart['order']['total'] = $total;
+
+        if(!empty($template_vars['subtotal']))
+        {
+            $hb_subtotal = $template_vars['subtotal'];
+            if($discount_total > 0)
+            {
+                $hb_subtotal['discount'] = $discount_total;
+            }
+            $hb_subtotal['total'] = $subtotal;
+            if($subtotal_recurring > 0)
+            {
+                $hb_subtotal['recurring'][$cycle] = $subtotal_recurring;
+            }
+            $return_array['subtotal'] = $hb_subtotal;
+
+            $this->cart['recurring'] = $subtotal_recurring;
+        }
+
+        if(!empty($template_vars['currency']))
+        {
+            $return_array['currency'] = $template_vars['currency'];
+            $return_array['currency']['rate'] = 1; // Pasamos el ratio a 1 para que no toque los precios
+        }
+
+        if(!empty($template_vars['products']))
+        {
+            $return_array['products'] = $products;
+        }
+
+        if(!empty($template_vars['product']))
+        {
+            $return_array['product'] = $product;
+        }
+
+        if(!empty($template_vars['contents']))
+        {
+            $return_array['contents'] = $template_vars['contents'];
+        }
+
+        if(!empty($template_vars['contents']['product']))
+        {
+            $return_array['contents']['product'] = $contents0;
+        }
+
+        if(!empty($template_vars['contents']['config']))
+        {
+            $return_array['contents']['config'][$contents_config_id] = $contents_config;
+        }
+
+        if(!empty($template_vars['cart_contents']))
+        {
+            $return_array['cart_contents'] = $return_array['contents'];
+        }
+
+        if(isset($_SESSION['Cart'][1]) and !empty($_SESSION['Cart'][1]) and isset($contents0))
+        {
+            $_SESSION['Cart'][1] = $contents0;
+        }
+
+        $_SESSION['GigasCart'] = $this->cart;
+
+        #file_put_contents('/tmp/cart.txt', print_r($this->cart, true));
+        #file_put_contents('/tmp/return_array.txt', print_r($return_array, true));
+        return $return_array;
+    }
+
+    private function _get_domain_price_info ($all_prices) {
+        $price_info = array();
+        foreach ($all_prices as $p) {
+            if ($p["is_register"]) {
+                $price_info['register'] = $p['register'];
+                $price_info['renew'] = $p['renew'];
+            }
+            else {
+                $price_info['transfer'] = $p['transfer'];
+            }
+        }
+        return $price_info;
+    }
+
+    private function _convert_multiple_domain_prices($domain_price_list) {
+        # juntamos los valores de register y renew con transfer para 
+        # que sea solo una linea 
+        $price_info = array();
+        foreach ($domain_price_list as $p) {
+            if (empty ($price_info[$p['name']][$p['period']])) {
+                $price_info[$p['name']][$p['period']] = $p;
+            }
+            $temp_p = $price_info[$p['name']][$p['period']];
+            if ($p["is_register"]) {
+                $temp_p['register'] = $p['register'];
+                $temp_p['renew'] = $p['renew'];
+            }
+            else {
+                $temp_p['transfer'] = $p['transfer'];
+            }
+            $price_info[$p['name']][$p['period']] = $temp_p;
+        }
+        $result = array();
+        foreach ($price_info as $tld=>$tld_info) {
+            foreach ($tld_info as $period) {
+                $result[] = $period;
+            }
+        }
+        return $result;
+    }
+
+    public function getDomainPrices($tld, $period)
+    {
+        if(!is_null($this->currency_id) and $this->currency_id !== 0)
+        {
+            $q = $this->db->prepare(
+                "SELECT hp.name, gdp.period, gdp.register, gdp.transfer, gdp.renew, (hc.slug = 'domain-registration') as is_register ".
+                "FROM hb_products hp ".
+                "JOIN hb_domain_periods hdp ON hdp.product_id = hp.id ".
+                "JOIN hb_categories hc ON hp.category_id = hc.id ".
+                "JOIN gigas_global_domainprice gdp ON gdp.localprice_id = hp.id AND gdp.period = hdp.period AND gdp.currency_id = ? ".
+                "JOIN hb_currencies c ON c.id = gdp.currency_id ".
+                "WHERE hp.name = ? AND hdp.period = ?"
+            );
+            $q->execute(array($this->currency_id, $tld, $period));
+            $query_values = $q->fetchAll(PDO::FETCH_ASSOC);
+            $price_info = $this->_convert_multiple_domain_prices($query_values);
+            $price_info = $price_info[0];
+            $q->closeCursor();
+        }
+        elseif(!is_null($this->currency_code) and $this->currency_code != 'EUR')
+        {
+            $q = $this->db->prepare("SELECT id FROM hb_currencies WHERE code = ?");
+            $q->execute(array($this->currency_code));
+            $d = $q->fetch(PDO::FETCH_ASSOC);
+            $q->closeCursor();
+            if(!empty($d))
+            {
+                $this->currency_id = $d['id'];
+                return $this->getDomainPrices($tld, $period);
+            }
+            $price_info = null;
+        }
+        else
+        {
+            $q = $this->db->prepare(
+                "SELECT register, transfer, renew, (hc.slug = 'domain-registration') as is_register" .
+                "FROM hb_domain_periods ".
+                "JOIN hb_products hp ON hp.id = hb_domain_periods.product_id ".
+                "JOIN hb_categories hc ON hp.category_id = hc.id ".
+                "WHERE hp.name = ? AND period = ?"
+            );
+            $q->execute(array($tld, $period));
+            $price_info = $this->_convert_multiple_domain_prices($q->fetchAll(PDO::FETCH_ASSOC));
+            $price_info = $price_info[0];
+            $q->closeCursor();
+        }
+
+        if(empty($price_info))
+        {
+            return array('register' => 'TBC', 'transfer' => 'TBC', 'renew' => 'TBC');
+        }
+
+        return $price_info;
+    }
+
+    public function convertDomainPrices($template_vars)
+    {
+        #
+        # Seteamos las locale desde las variables de plantilla
+        #
+        $this->setLocales($template_vars);
+
+        #
+        # Si estamos en la moneda por defecto no tocamos nada
+        #
+        if($this->currency_id == 0 or ! $this->enabled())
+        {
+            $_SESSION['GigasCart'] = null;
+            unset($_SESSION['GigasCart']);
+            return $template_vars;
+        }
+
+        $return_array['check'] = $template_vars['check'];
+
+        if(isset($template_vars['check']['tld']))
+        {
+            $return_array['check'][0] = $return_array['check'];
+        }
+
+        foreach($return_array['check'] as $k => $domain)
+        {
+            if($this->currency_id == 0 /* or $this->country == 'ES' */ or $this->currency_code == 'EUR')
+            {
+                $q = $this->db->prepare(
+                    "SELECT hp.name, hdp.*, (hc.slug = 'domain-registration') as is_register ".
+                    "FROM hb_domain_periods hdp " .
+                    "JOIN hb_products hp ON hp.id=hdp.product_id " .
+                    "join hb_categories hc on hp.category_id = hc.id ".
+                    "WHERE hp.name= ? AND period != 0;"
+                );
+                $q->execute(array($domain['tld']));
+            }
+            else
+            {
+                $q = $this->db->prepare(
+                    "SELECT hdp.*, gdp.register, gdp.transfer, gdp.renew, (hc.slug = 'domain-registration') as is_register ".
+                    "FROM hb_domain_periods hdp ".
+                    "JOIN hb_products hp ON hp.id=hdp.product_id ".
+                    "join hb_categories hc on hp.category_id = hc.id ".
+                    "JOIN gigas_global_domainprice gdp ON gdp.localprice_id = hp.id AND gdp.period=hdp.period AND gdp.currency_id = ? ".
+                    "WHERE hp.name = ?"
+                );
+                $q->execute(array($this->currency_id, $domain['tld']));
+            }
+            $d = $this->_convert_multiple_domain_prices($q->fetchAll(PDO::FETCH_ASSOC));
+            $q->closeCursor();
+
+            if(!empty($d))
+            {
+                $return_array['check'][$k]['prices'] = $d;
+            }
+            else
+            {
+                unset($return_array['check'][$k]);
+            }
+        }
+
+        if(isset($template_vars['check']['tld']))
+        {
+            $return_array['check'] = $return_array['check'][0];
+        }
+
+        $return_array['currency'] = $template_vars['currency'];
+        $return_array['currency']['rate'] = 1;
+        $return_array['mu_currency_id'] = $this->currency_id;
+
+        return $return_array;
+    }
+
+    public function getCycleByBillingcycle($billingcycle)
+    {
+        if (strlen($billingcycle) == 1) {
+            $cycle = $billingcycle;
+        } else {
+            switch($billingcycle)
+            {
+                case "Hourly": $cycle = "h"; break;
+                case "Daily": $cycle = "d"; break;
+                case "Weekly": $cycle = "w"; break;
+                case "Monthly": $cycle = "m"; break;
+                case "Quarterly": $cycle = "q"; break;
+                case "Semi-Annually": $cycle = "s"; break;
+                case "Annually": $cycle = "a"; break;
+                case "Biennially": $cycle = "b"; break;
+                case "Triennially": $cycle = "t"; break;
+                default: $cycle = "m";
+            }
+        }
+
+        return $cycle;
+    }
+
+    public function getTaxRate($country, $state, $type='L1')
+    {
+        foreach(array($country, '0') as $c)
+        {
+            foreach(array($state, '0') as $s)
+            {
+                $query = $this->db->prepare("SELECT name, rate FROM hb_tax where country = ? and state = ? and type = ? LIMIT 1");
+                $query->execute(array($c, $s, $type));
+                $tax_info = $query->fetch(PDO::FETCH_ASSOC);
+                if(!empty($tax_info))
+                {
+                    $tax_info['rate'] = floatval($tax_info['rate']) * 1.00;
+                    return $tax_info;
+                }
+            }
+        }
+        return array('name'=>'IVA', 'rate' => 0.00);
+    }
+
+    public function convertAdminUpgrade($order, $account)
+    {
+        $upgrades = $order['upgrades'];
+        $new_product_id = $upgrades[0]['product_id'];
+        $old_product_id = $account['product_id'];
+
+        $client = $this->api->getClientDetails(array('id'=>$account['client_id']));
+        #$cycle = $this->getCycleByBillingcycle($account['billingcycle']);
+        $cycle = self::$CYCLES[$account['billingcycle']];
+        $old_cycle = $cycle; # billing cycle can't be changed from admin, i hope :)
+        $product_price = $this->getProductPrice($new_product_id, $cycle);
+
+        $item_price = $product_price['price'] + $product_price['setup'];
+        $old_item_price = $account['total'];
+
+        $d1 = new DateTime(date('Y/m/d'));
+        $d2 = new DateTime($account['next_due']);
+        $interval = $d2->diff($d1);
+
+        $pr_interval = $interval->days;
+
+        # Calculamos cuanto tiene que pagar:
+        $item_price_pr = ($item_price / self::$CYCLE_DAYS[$cycle]) * $pr_interval;
+        $old_item_price_pr = ($old_item_price / self::$CYCLE_DAYS[$old_cycle]) * $pr_interval;
+        $order_total = $item_price_pr - $old_item_price_pr;
+        $account_total = $product_price['price'];
+
+        $subtotal = $order_total > 0 ? $order_total : 0;
+        $total = $subtotal;
+        $taxed1 = 0;
+        $taxed2 = 0;
+
+        $subtotal = number_format($subtotal, 2, '.', '');
+        $total = number_format($total, 2, '.', '');
+
+        # Aplicamos tasas
+        $tax1 = $this->getTaxRate($client['country'], $client['state'], 'L1');
+        $tax2 = $this->getTaxRate($client['country'], $client['state'], 'L2');
+
+        if($client['taxexempt'] == 0 and !empty($tax1['rate']) and $subtotal > 0)
+        {
+            if($tax1['rate'] != 0)
+            {
+                $taxed1 = $this->calculatePercent($subtotal, $tax1['rate']);
+                $total += $taxed1;
+            }
+
+            if($tax2['rate'] != 0) // REVISAR ESTO PORQUE NO SE ESTÁ HACIENDO BIEN
+            {
+                $taxed2 = $this->calculatePercent($subtotal, $tax2['rate']);
+                $total += $taxed2;
+            }
+        }
+
+        //
+        // Descontamos el crédito que tenga el cliente
+        //
+
+        // Primero le volvemos a añadir el crédito que hostbill el ha quitado
+        $invoice = $this->api->getInvoiceDetails(array('id'=>$order['invoice_id']));
+        $credit_to_add = $invoice['credit'];
+
+        $client_credit = $client['credit'] + $credit_to_add;
+        $remaining_credit = $client_credit;
+
+        // Descontamos el crédito correctamente       
+        if($client_credit > 0 and $total > 0)
+        {
+            $total_after_credit = ($subtotal > $client_credit) ? $total - $client_credit : '0.00';
+            $credit = $total - $total_after_credit;
+            $total = $total_after_credit;
+            $remaining_credit = $client_credit - $credit;
+        }
+
+        //
+        // Devolvemos el carrito
+        //
+        $cart = array(
+            'currency_id' => 2,
+            'items' => array(
+                array(
+                    'type' => 'Upgrade',
+                    'product_id' => $upgrades[0]['id'],
+                    'price' => $order_total,
+                ),
+            ),
+            'order' => array(
+                'total' => $total,
+            ),
+            'subtotal' => $subtotal,
+            'credit' => $credit,
+            'tax' => $taxed1,
+            'taxrate' => $tax1['rate'],
+            'tax2' => $taxed2,
+            'taxrate2' => $tax2['rate'],
+            'total' => $total,
+            'recurring' => $account_total,
+            'remaining_credit' => $remaining_credit,
+        );
+
+        return $cart;
+    }
+
+    public function convertAddons($template_vars)
+    {
+        $this->setLocales($template_vars);
+        //
+        // Si existe addons le pegamos cambiazo a los precios de todos los addons
+        //
+        if(isset($template_vars['alladdons']) and !empty($template_vars['alladdons']))
+        {
+            foreach($template_vars['alladdons'] as $k=>$addon)
+            {
+                foreach(array_values(self::$CYCLES) as $acycle)
+                {
+                    $c_price = $this->getAddonPrice($addon['id'], $acycle);
+                    $template_vars['alladdons'][$k][$acycle] = $c_price['price'];
+                    $template_vars['alladdons'][$k][$acycle . '_setup'] = $c_price['setup'];
+                }
+            }
+        }
+
+        if(isset($template_vars['applied_addons']) and !empty($template_vars['applied_addons']))
+        {
+            foreach($template_vars['applied_addons'] as $k=>$addons)
+            {
+                foreach($addons as $k2 => $addon)
+                {
+                    foreach(array_values(self::$CYCLES) as $acycle)
+                    {
+                        $c_price = $this->getAddonPrice($addon['id'], $acycle);
+                        $template_vars['applied_addons'][$k][$k2][$acycle] = $c_price['price'];
+                        $template_vars['applied_addons'][$k][$k2][$acycle . '_setup'] = $c_price['setup'];
+                    }
+                }
+            }
+        }
+
+
+        return $template_vars;
+    }
+}

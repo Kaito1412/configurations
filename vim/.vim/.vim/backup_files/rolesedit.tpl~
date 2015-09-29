@@ -1,0 +1,200 @@
+{php}
+$lang=$this->get_template_vars("lang_roles");
+{/php}
+<section id="thestuff">
+  <div class="tab-wrap">
+    <div class="tabs">
+      <ul>
+        <li><a href="{$ca_url}profiles/">{$lang.profiles}</a></li>
+        <li><a class="active" href="?cmd=gigasrol">{$lang.roles}</a></li>
+      </ul>
+    </div>	
+    
+    <div class="formwrap w2">
+      <h2>Rol: {if $role.name}{$role.name}{else}{$lang.new_role}{/if}</h2>
+      <div class="cbreadcrumb">
+	<a href="?cmd=gigasrol"><strong>{$lang.roles}</strong></a> &raquo;
+    	<a href=""><strong>{$lang.role_edit}</strong></a>
+      </div><br>
+
+      <div class="wbox_header wbox_users">{$lang.role_details}</div>
+      <div class="clear"></div><br />
+      <form method="post" action="{$form_action}" >
+        {security_token}
+        {if $action=="edit" || $action=="modify"}
+          <input type="hidden" name="role_id" value={$role_id}{if $readonly} disabled{/if} />
+        {/if}
+        <div class="tab-roles">
+          <label for="name">{$lang.name}<span class="req">*</span></label>
+          <input type="text" value="{$name}" name="name" id="name-input" {if $readonly}disabled{/if}/>
+	</div>
+        
+        <div class="usr-cont">
+          <label id="">{$lang.Description}</label>
+          <textarea rows="4" name="description" {if $readonly}disabled{/if}>{$description}</textarea>
+        </div>
+        
+        <div class="clear"></div>
+        
+        <div class="centered-title"><div></div><span>{$lang.privileges}</span><div></div></div>
+        
+        {foreach from=$permissions item=permcat key=cat name=permcatloop}
+          <div class="clear"></div>
+          {php}
+          $cat_slug = strtolower(trim($this->get_template_vars('cat')));
+          $cat_slug = preg_replace('/[\W\d-]/', '-', $cat_slug);
+          $this->assign('cat_slug', $cat_slug);
+          {/php}
+          <h2 style="float:none">{if isset($lang[$cat_slug])}{$lang[$cat_slug]}{else}{$cat}{/if}</h2>
+
+          <div class="privilegios">
+            <div id="accordion-{$cat}">
+              {foreach from=$permcat item=permgroup key=product name=permgrouploop}
+               {$permgroup|@var_dump}
+                <h3>
+                <span class="selector">
+                  <input type="checkbox" class="privilege" id="permgroup[{$product}]" name="permgroup[{$product}]" {if $readonly}disabled{/if} />
+                  {php}
+                  $product_slug = strtolower(trim($this->get_template_vars('product')));
+                  $product_slug = preg_replace('/[\W-]/', '-', $product_slug);
+                  $this->assign('product_slug', $product_slug);
+                  {/php}
+                  <label class="common" for="permgroup[{$product}]" >{assign var=product_locale value="`$product`_main"}{if $lang_roles[$product_locale]}{$lang_roles[$product_locale]}{elseif $lang[$product_slug]}{$lang[$product_slug]}{elseif $lang[$product]}{$lang[$product]}{else}{$product}{/if}</label>
+                </span>
+                </h3>
+                <div class="pgroup">
+                  <table border="0" cellspacing="0" cellpadding="0" width="100%">
+                    {foreach from=$permgroup item=perm key=permkey name=permloop}
+                      {if $smarty.foreach.permloop.index % 3 == 0}
+                        <tr>
+                      {/if}
+                      <td width="33%">
+                        <input type="checkbox" 
+                               class="privilege billing" 
+                               id="permission-{$perm.id}"
+                               {if $perm.checked}checked{/if}
+                               name="permission[{$perm.item_class}][{if ($perm.item_class == 'product' || $perm.item_class == 'domain')}{$perm.subclass_id}{else}0{/if}][{$perm.item}]" {if $readonly}disabled{/if}/>
+                               <label class="common" for="permission-{$perm.id}" name="permission[{$perm.item_class}][{if ($perm.item_class == 'product' || $perm.item_class == 'domain')}{$perm.subclass_id}{else}0{/if}][{$perm.item}]">
+                                 {php}
+                                 $perm = $this->get_template_vars("perm");
+                                 if (isset($lang[$perm['description']])) {
+                                   $trans = $lang[$perm['description']];
+                                 } elseif (isset($lang[$perm['item']])) {
+                                   $trans = $lang[$perm['item']];
+                                 } elseif (isset($lang[$perm["item_class"] . "_" . $perm['item']])) {
+                                   $trans = $lang[$perm["item_class"] . "_" . $perm['item']];
+                                 } elseif (isset($lang[$perm["item_class"] . "s_" . $perm['item']])) {
+                                   $trans = $lang[$perm["item_class"] . "s_" . $perm['item']];
+                                 } elseif (isset($lang["service_" . $perm['item']])) {
+                                   $trans = $lang["service_" . $perm['item']];
+                                 } elseif (isset($lang[$perm['item'] . "_widget"])) {
+                                   $trans = $lang[$perm['item'] . "_widget"];
+                                 } elseif (!empty($perm['description'])) {
+                                   $trans = $perm['description'];
+                                 } else {
+                                   $trans = $perm['item'];
+                                 }
+                                 $this->assign("trans", $trans);
+                                 {/php}
+                                 <div>{$trans}</div>
+                               </label>
+                      </td>
+                      {if $smarty.foreach.permloop.index % 3 == 2 || $smarty.foreach.permloop.last}
+                        </tr>
+                      {/if}
+                    {/foreach}
+                  </table>
+                </div>
+            {/foreach}
+
+            
+          </div>         
+        </div>
+        {/foreach}
+        <div>
+          <input type="submit" value="{$lang.submit}" style="font-weight:bold;margin:5px;" class="padded" {if $readonly}disabled{/if}/>
+        </div>
+        
+      </form>
+      
+    </div>  
+  </div>
+</section>
+<script>
+ {literal}
+ $(function() {
+   $("[id^=accordion]" ).accordion({
+     collapsible: true, autoHeight: false, 
+     active: false 
+   });
+   $('[id^=accordion] h3 span.selector').click(function(e) {
+     e.stopPropagation();
+     $(this).parent().next('div.pgroup').find('[type="checkbox"]').prop("checked", $(this).children("input").prop("checked"));
+     $(this).find("label").removeClass("partial");
+
+   });
+
+   function mark_group(some_checkbox, correction) {
+     correction = typeof correction !== 'undefined' ? correction : 0; //default parameter = 0
+     var group = some_checkbox.parents(".pgroup");
+     var num_checkbox = group.find("tr input").length;
+     var marked_checkbox = group.find("tr input:checked").length + correction;
+     group.prev().find("input").prop('checked', (num_checkbox > 0 && num_checkbox == marked_checkbox));
+     if (marked_checkbox > 0 && num_checkbox != marked_checkbox) {
+       group.prev().find("label").addClass("partial");
+     } else {
+       group.prev().find("label").removeClass("partial");
+     }
+   }
+
+   {/literal}
+   {if (!$readonly)}
+   {literal}
+   $('label[name^=permission]').click(function (e) {
+     var checkbox = $("#" + $(this).attr("for"));
+     if (typeof(checkbox[0]) !== "undefined") {
+       var correction = checkbox[0].checked ? -1 : 1; //clicking on a label happens before toggling the associated checbox 
+       mark_group(checkbox, correction);
+     }
+   });
+
+   {/literal}
+   {/if}
+   {literal}
+
+   $('.pgroup').each(function (i, e) { mark_group($(e).find('input').first());});
+  
+ });
+ {/literal}
+</script>
+{if $readonly}
+  {literal}
+  <script>
+    $(function() {
+     var qtip_value = {
+       content: {
+         text:'{/literal}{$lang.notineditmode}{literal}'
+       },
+       position: {
+         my: 'top center', // Use the corner...
+         at: 'bottom center' // ...and opposite corner
+       },
+       show: {
+         event: 'mouseenter',
+         solo: true
+       },
+       hide: {
+         event:'mouseleave',
+         inactive: 1000
+       },
+       style: {
+         classes: 'ui-tooltip-shadow ui-tooltip-dark'
+       }
+     };
+     $("textarea").qtip(qtip_value);
+     $("input + label").qtip(qtip_value);
+
+   });
+  </script>
+  {/literal}
+{/if}

@@ -1,0 +1,280 @@
+# -*- coding: utf-8 -*-
+import cronbase
+import requests
+from sqlalchemy import and_
+from accounts.models import Account, Vlan
+from django.db.models import Q
+from django.core.exceptions import ObjectDoesNotExist
+from sqlalchemy.orm.exc import NoResultFound 
+import logging
+
+
+'''
+Que hace este script:
+
+    Para todos los billing plan:
+        1- Se asegura de que todos los billing plan tiene acceso a todas las redes públicas disponibles
+
+    Solo para billing plan custom:
+        2- Se asegura de que todas las redes privadas contratadas en Hostbill son accesibles
+        3- Recorre todas las redes privadas de cada billing plan, excepto las creadas en el punto 2, y repara los límites
+        4- Recorre todas las redes públicas de cada billing plan y repara los limites
+        5- Repara el limite global de IP
+
+Con SAFE_MODE = True no realizará ningún cambio
+'''
+
+SAFE_MODE = True
+usernames_fixed = list()
+base_bps_fixed = list()
+VLAN_IP_LIMIT = 254
+
+
+def get_hostbill_product_option(product, _option):
+    try:
+        return int(product.options.split(_option)[1].split('"')[2])
+
+    except (IndexError, ValueError):
+        return 0
+
+
+def get_vlans(client_id):
+    return Account.objects.filter(
+                product_id__category_id__name__icontains='vlan',
+                client_id=client_id,
+                status='Active'
+            )
+
+server_id = None
+onapp_db = None
+
+
+for cloud in Account.objects.filter(product_id__category_id__name__icontains='cloud', status__in=['Active', 'Suspended', 'Pending']).order_by('server_id'):
+
+    try:
+        cloud_server = cloud.server_id
+    except ObjectDoesNotExist:
+        logging.error('Account #{0} has an invalid server'.format(cloud.id))
+        continue
+
+    if server_id != cloud_server:
+        if onapp_db:
+            onapp_db.session.remove()
+            onapp_db.session.close()
+
+        try:
+            onapp_db = cloud.server_id.onapp_set.get().get_db()
+
+        except:
+            logging.exception("ERROR: Cannot connect to database. server: %s" % cloud.server_id)
+            continue
+
+        server_id = cloud.server_id
+
+    if cloud.username in usernames_fixed:
+        continue
+
+    # Averiguamos las IP que le corresponden al account por producto, addon y vlans segun Hostbill
+    product_ips = get_hostbill_product_option(cloud.product_id.productmodule_set.all()[0], 'option13')
+    addon_ips = len(cloud.accountaddon_set.filter(Q(name='extra_ip') | Q(name='Additional IP'), status='Active'))
+    addon_20_ips = len(cloud.accountaddon_set.filter(name='20 extra_ip\'s', status='Active')) * 20
+    try:
+        vlans = get_vlans(cloud.client_id)
+    except:
+        print "ERROR: cloud %s client does not exist" % cloud.id
+        continue
+    num_vlans = len(vlans)
+    vlan_ips = num_vlans * VLAN_IP_LIMIT
+
+    total_ip_limit = product_ips + addon_ips + addon_20_ips + vlan_ips
+    public_ip_limit = product_ips + addon_ips + addon_20_ips
+
+    # Buscamos el usuario de onapp para llegar a su billing plan
+    user = onapp_db.users.filter(onapp_db.users.login == cloud.username).first()
+
+    if user is None:
+        #print "ERROR: No se encuentra el usuario de OnApp '%s'" % cloud.username
+        continue
+
+    # Averiguamos su billing plan
+    bp = onapp_db.billing_plans.filter(onapp_db.billing_plans.id == user.billing_plan_id).first()
+
+    # Buscamos todas las redes publicas
+    public_network_groups = onapp_db.packs.filter(onapp_db.packs.label.like('Network Zone%')).all()
+    public_ids = [pngr.id for pngr in public_network_groups]
+
+    # Extraemos todos los resources el billing plan
+    bp_networkg_ids = [brng.target_id for brng in onapp_db.base_resources.filter(
+                onapp_db.base_resources.billing_plan_id == user.billing_plan_id,
+                onapp_db.base_resources.type == 'Resource::NetworkGroup'
+            ).all()]
+
+    onapp_model = cloud.server_id.onapp_set.get()
+
+    '''
+        1- Se asegura de que todos los billing plan tiene acceso a todas las redes públicas disponibles
+    '''
+    for public_id in public_ids:
+
+        if public_id not in bp_networkg_ids and not "%s-%s" % (bp.id, public_id) in base_bps_fixed:
+            if SAFE_MODE is False:
+                new_br = {
+                        "base_resource": {
+                            "resource_class": "Resource::NetworkGroup",
+                            "billing_plan_id": bp.id,
+                            "target_id": public_id,
+                            "target_type":"NetworkGroup",
+                            "limits": {
+                                "limit_ip": product_ips,
+                                    "limit_ip_free": product_ips,
+                                    "limit_rate": "50",
+                                    "limit_rate_free": "50",
+                                    "limit_data_sent_free": "",
+                                    "limit_data_received_free": ""
+                            },
+                            "prices": {
+                                    "price_ip_on": "0",
+                                    "price_ip_off": "0",
+                                    "price_rate_on": "0",
+                                    "price_rate_off": "0",
+                                    "price_data_sent": "0",
+                                    "price_data_received": "0"
+                            }
+                        }
+                }
+                onapp_model.add_base_resource(bp.id, new_br)
+
+            base_bps_fixed.append("%s-%s" % (bp.id, public_id))
+
+            print "INFO: Añadimos network_group público", public_id, "al billing plan", bp.id
+
+    # Si el billing plan no es custom ya hemos terminado
+    if '_custom_' not in bp.label and '_hb_client_' not in bp.label:
+        #print "IGNORED: Billing plan base, se ignora"
+        continue
+
+    # Calculamos cuantas vlan hay en OnApp
+    private_network_groups = onapp_db.packs.filter(onapp_db.packs.label.like('private_network_zone_%')).all()
+    private_ids = [pngr.id for pngr in private_network_groups]
+
+    vlans_onapp = [v.target_id for v in onapp_db.base_resources.filter(and_(
+                onapp_db.base_resources.billing_plan_id == user.billing_plan_id,
+                onapp_db.base_resources.type == 'Resource::NetworkGroup',
+                onapp_db.base_resources.target_id.in_(private_ids)
+            )).all()]
+
+    num_vlans_onapp = len(vlans_onapp)
+
+    new_vlans = list()
+
+    # OnApp tiene menos vlan por lo que añadimos
+    if num_vlans > num_vlans_onapp:
+        print "WARNING: El billing plan", bp.id, "no tiene creadas en OnApp todas las VLAN contratadas (%s de %s)" % (num_vlans_onapp, num_vlans)
+
+        for vlan in vlans:
+            try:
+                vlan_info = vlan.vlan_set.get()
+                vlan_id = vlan_info.vlan
+                try:
+                    network_group_id = onapp_db.networks.filter(
+                                onapp_db.networks.vlan == vlan_id
+                            ).first().network_group_id
+                except AttributeError:
+                    continue
+
+                '''
+                    2- Se asegura de que todas las redes privadas contratadas en Hostbill son accesibles
+                '''
+                if network_group_id not in vlans_onapp:
+
+                    if SAFE_MODE is False:
+                        new_br = {
+                                "base_resource": {
+                                    "resource_class": "Resource::NetworkGroup",
+                                    "billing_plan_id": bp.id,
+                                    "target_id": network_group_id,
+                                    "target_type":"NetworkGroup",
+                                    "limits": {
+                                            "limit_ip": VLAN_IP_LIMIT,
+                                            "limit_ip_free": VLAN_IP_LIMIT,
+                                            "limit_rate": "",
+                                            "limit_rate_free": "",
+                                            "limit_data_sent_free": "",
+                                            "limit_data_received_free": ""
+                                    },
+                                    "prices": {
+                                            "price_ip_on": "0",
+                                            "price_ip_off": "0",
+                                            "price_rate_on": "0",
+                                            "price_rate_off": "0",
+                                            "price_data_sent": "0",
+                                            "price_data_received": "0"
+                                    }
+                                }
+                        }
+                        onapp_model.add_base_resource(bp.id, new_br)
+
+                    print "INFO: Añadimos network_group", network_group_id, "al billing plan", bp.id
+
+                    new_vlans.append(network_group_id)
+
+            except Vlan.DoesNotExist:
+                pass
+
+    elif num_vlans < num_vlans_onapp:
+        # OnApp tiene más vlan de las contratadas!!! ERROR!!!
+        print "ERROR: El billing plan", bp.id, "tiene más VLAN de las contratadas"
+
+    # Recorremos los base resource del billing plan cambiando los limites
+    brs = onapp_db.base_resources.filter(onapp_db.base_resources.billing_plan_id == user.billing_plan_id).all()
+    for br in brs:
+
+        if br.type == 'Resource::NetworkGroup' and br.target_id not in new_vlans:
+            try:
+                network_group = onapp_db.packs.filter(onapp_db.packs.id == br.target_id).one()
+            except NoResultFound:
+                logging.error('Network group {0} not found'.format(br.target_id))
+                continue
+            
+            if network_group is not None:
+                if 'private_network_zone_' in network_group.label:  # RED PRIVADA
+                    '''
+                        3- Recorre todas las redes privadas de cada billing plan, excepto las creadas en el punto 2, y repara los límites
+                    '''
+                    if SAFE_MODE is False:
+                        data = {"base_resource": {"limits": {
+                                    "limit_ip": VLAN_IP_LIMIT,
+                                    "limit_ip_free": VLAN_IP_LIMIT,
+                                    "limit_rate": "",
+                                    "limit_rate_free": "",
+                                    "limit_data_sent_free": "",
+                                    "limit_data_received_free": ""
+                                }}}
+                        onapp_model.set_base_resource(br.billing_plan_id, br.id, data)
+
+                elif network_group.label.startswith('Network Zone'):  # RED PUBLICA
+                    '''
+                        4- Recorre todas las redes públicas de cada billing plan y repara los limites
+                    '''
+                    if SAFE_MODE is False:
+                        data = {"base_resource": {"limits": {
+                                    "limit_ip": public_ip_limit,
+                                    "limit_ip_free": public_ip_limit,
+                                    "limit_rate": "50",
+                                    "limit_rate_free": "50",
+                                    "limit_data_sent_free": "",
+                                    "limit_data_received_free": ""
+                                }}}
+                        onapp_model.set_base_resource(br.billing_plan_id, br.id, data)
+
+        elif br.type == 'Resource::IpAddress':  # LIMITE GLOBAL
+            '''
+                5- Repara el limite global de IP
+            '''
+            if SAFE_MODE is False:
+                data = {"base_resource": {"limits": {"limit": total_ip_limit, "limit_free": 0}}}
+                onapp_model.set_base_resource(br.billing_plan_id, br.id, data)
+
+    print "CHANGED: account_id: %s // billing_plan_id: %s // login: %s // user_id: %s // vlans: %s // total_ips: %s // public_ips: %s" % (cloud.id, br.billing_plan_id, user.login, user.id, num_vlans, total_ip_limit, public_ip_limit)
+
+    usernames_fixed.append(user.login)

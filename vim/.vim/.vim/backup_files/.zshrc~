@@ -42,10 +42,6 @@ bindkey "ee[C"   forward-word
 bindkey "ee[D"   backward-word
 bindkey "^H"     backward-delete-word
 
-#Binding with control key
-bindkey '^a'  beginning-of-line
-bindkey '^e'     end-of-line
-
 # Allow for functions in the prompt.
 setopt PROMPT_SUBST
  

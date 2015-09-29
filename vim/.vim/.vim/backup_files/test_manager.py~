@@ -1,0 +1,400 @@
+from os import environ
+comfy_config = "{project}_CONFIG".format(
+    project=environ.get("COMFY_DEFAULT", "managers").upper())
+environ[comfy_config] = environ.get(comfy_config, "tests/managertests.json")
+
+from nose.tools import ok_, eq_, raises
+from functools import wraps
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm.exc import MultipleResultsFound
+import sqlalchemy.orm.session as sa_session
+from managers.base import DBManager
+from managers.db_manager import DiskManager
+from managers.exceptions import ManagerException
+# (ResourceCreationException, ModificationFunctionError)
+from tests import some_db
+# import time
+try:
+    from functools import reduce
+except ImportError:
+    pass
+
+
+class TestManager(object):
+    def setup(self):
+        self.dm = DiskManager(0, 1, True)
+
+    def test_session(self):
+        assert(self.dm._session is None)
+        ok_(self.dm.session)
+
+    def test_disk_list(self):
+        l = self.dm.get_list()
+        ok_(l)
+        ok_(next(l))
+
+
+def has_pending_sessions():
+    """
+    Go throught the sessions and see if there are any active
+    """
+    def check_session(acc, ses):
+        if ses.transaction is not None:
+            for con in ses.transaction._connections:
+                try:
+                    if con.in_transaction():
+                        return True
+                except AttributeError:
+                    pass
+        return acc
+
+    return reduce(
+        check_session,
+        sa_session._sessions.values(),
+        False)
+
+
+def check_for_pending_session(func):
+    @wraps(func)
+    def _decorator(*args, **kwargs):
+        res = func(*args, **kwargs)
+        ok_(not has_pending_sessions(),
+            "There where pending sessions after the call. "
+            "Be aware that this is a tough bug to solve and "
+            "can even give false positives")
+        return res
+    return _decorator
+
+
+class BaseTestingClass(object):
+
+    def set_db_up(self, console=0):
+        session = some_db.get_session(console)
+        self._eng = session.get_bind()
+        self._meta = some_db.metadata
+        self._meta.bind = self._eng
+        try:
+            self._meta.create_all()
+        except OperationalError:
+            raise SystemError("You probably forgot to create the database")
+        self.user_mngr = DBManager(database=some_db,
+                                   object_class=some_db.SomeModel,
+                                   console=console,
+                                   cloud_id=1,
+                                   as_admin=False)
+
+        self.admin_mngr = DBManager(database=some_db,
+                                    object_class=some_db.SomeModel,
+                                    console=console,
+                                    cloud_id=1,
+                                    as_admin=True)
+        session.close()
+
+    def _go_through_iterator(self, iterator, num_items):
+        """
+        Given an iterator, expand it and make sure there are
+        as many items as expected
+        """
+        count = 0
+        result = []
+        while (count < num_items):
+            try:
+                result.append(next(iterator))
+            except StopIteration:
+                ok_(False,
+                    "Iterator didn't have enough items,"
+                    " got {} expected {}".format(count, num_items))
+            count += 1
+
+        try:
+            next(iterator)
+        except StopIteration:
+            pass
+        else:
+            ok_(False,
+                "Iterator had more items than expected, "
+                "got {} expected {}".format(count, num_items))
+
+        return result
+
+    def tearDown(self):
+        sa_session.Session.close_all()
+        self._meta.drop_all(checkfirst=True)
+
+
+class TestFromEmpty(BaseTestingClass):
+    def setup(self):
+        self.set_db_up()
+
+    def test_session(self):
+        ok_(self.user_mngr._session is None)
+        ok_(self.user_mngr.session)
+
+    def test_manager_creation(self):
+        eq_(self.admin_mngr.obj_class, some_db.SomeModel)
+
+    @raises(ManagerException)
+    def test_get_object_none(self):
+        self.admin_mngr.get_object(None)
+
+    @raises(ManagerException)
+    def test_user_cant_pass_query_filter(self):
+        self.user_mngr.get_object(1)
+
+    def test_get_object_empty(self):
+        res = self.admin_mngr.get_object(1)
+        ok_(res is None,
+            "Shoulnd't have found anything: {}".format(res))
+
+    @raises(StopIteration)
+    def test_empty_iterator(self):
+        it = self.admin_mngr.get_list()
+        next(it)
+
+    def test_get_last_object_empty(self):
+        res = self.admin_mngr.get_last_object(1)
+        assert res is None, ("Shouldn't have found anything: {}"
+                             .format(res))
+
+    @raises(ManagerException)
+    def test_get_last_object_None(self):
+        self.admin_mngr.get_last_object(None)
+
+    def test_insert_object(self):
+        name = "test"
+        obj_id = self.admin_mngr.create_object({"name": name})
+        ok_(obj_id, "Does not have an id")
+        ok_(self.admin_mngr.get_count(), "None inserted")
+        obj = self.admin_mngr.get_object(obj_id)
+        ok_(obj, "Couldn't find the object")
+        eq_(obj.name, name,
+            "It has a different name {}!={}".format(obj.name, name))
+
+    @raises(ManagerException)
+    def test_insert_empty_object(self):
+        self.admin_mngr.create_object({})
+
+    @raises(TypeError)
+    def test_insert_wrong_object(self):
+        name = "test"
+        self.admin_mngr.create_object({"name": name, "invalid": 1})
+
+
+class TestWithSomeData(BaseTestingClass):
+    def setup(self):
+        self.set_db_up()
+        self.name1 = "name1"
+        self.name2 = "name2"
+        self.id1 = self.admin_mngr.create_object({"name": self.name1})
+        self.id2 = self.admin_mngr.create_object({"name": self.name2})
+        sa_session.Session.close_all()
+
+    @check_for_pending_session
+    def test_count(self):
+        eq_(self.admin_mngr.get_count(), 2)
+
+    @check_for_pending_session
+    def test_count_simple_filter(self):
+        eq_(self.admin_mngr.get_count({"name": self.name2}), 1)
+
+    @check_for_pending_session
+    def test_count_filter_in(self):
+        eq_(self.admin_mngr.get_count({"name": [self.name1, self.name2]}), 2)
+        eq_(self.admin_mngr.get_count({"name": [self.name1, ]}), 1)
+
+    @check_for_pending_session
+    def test_count_filter_not(self):
+        eq_(self.admin_mngr.get_count({"~name": self.name2}), 1)
+
+    @check_for_pending_session
+    def test_count_like(self):
+        eq_(self.admin_mngr.get_count({"name?": "%2%"}), 1)
+
+    @check_for_pending_session
+    def test_get(self):
+        eq_(self.admin_mngr.get_object(self.id1).id, self.id1)
+        eq_(self.admin_mngr.get_object(self.id2).id, self.id2)
+
+    @check_for_pending_session
+    def test_get_simple_filter(self):
+        eq_(self.admin_mngr.get_object({"name": self.name1}).id, self.id1)
+        eq_(self.admin_mngr.get_object({"name": self.name2}).id, self.id2)
+
+    @check_for_pending_session
+    def test_get_filter_in(self):
+        eq_(self.admin_mngr.get_object({"name": [self.name1]}).id, self.id1)
+        eq_(self.admin_mngr.get_object({"name": [self.name2]}).id, self.id2)
+
+    @check_for_pending_session
+    def test_get_filter_not(self):
+        eq_(self.admin_mngr.get_object({"~name": self.name2}).id, self.id1)
+        eq_(self.admin_mngr.get_object({"~name": self.name1}).id, self.id2)
+
+    @check_for_pending_session
+    def test_get_like(self):
+        eq_(self.admin_mngr.get_object({"name?": "%1%"}).id, self.id1)
+        eq_(self.admin_mngr.get_object({"name?": "%2%"}).id, self.id2)
+
+    @raises(MultipleResultsFound)
+    def test_get_multiple(self):
+        self.admin_mngr.get_object({"name?": "%"})
+
+    @check_for_pending_session
+    def test_delete_by_id(self):
+        ok_(self.admin_mngr.delete_by_id(self.id1), "Delete Wasn't True")
+        eq_(self.admin_mngr.get_count(), 1)
+
+    @check_for_pending_session
+    def test_delete_by_id_not_found(self):
+        ok_(self.admin_mngr.delete_by_id(3) is None, "Delete wasn't None")
+        eq_(self.admin_mngr.get_count(), 2)
+
+    @raises(TypeError)
+    def test_delete_None(self):
+        ok_(self.admin_mngr.delete(None))
+
+    @check_for_pending_session
+    def test_delete(self):
+        obj = self.admin_mngr.get_object(self.id1)
+        ok_(self.admin_mngr.delete(obj))
+        eq_(self.admin_mngr.get_count(), 1)
+
+    @check_for_pending_session
+    def test_list(self):
+        it = self.admin_mngr.get_list()
+        ok_(it, "Get list returned an empty value")
+        res = self._go_through_iterator(it, 2)
+        ok_(res[0] != res[1], "both are equal!")
+
+    @check_for_pending_session
+    def test_list_None(self):
+        it = self.admin_mngr.get_list()
+        ok_(it, "Get list returned an empty value")
+        res = self._go_through_iterator(it, 2)
+        ok_(res[0] != res[1], "both are equal!")
+
+    @check_for_pending_session
+    def test_list_simple_filter(self):
+        it = self.admin_mngr.get_list({"id": self.id1})
+        ok_(it, "Get list returned an empty value")
+        res = self._go_through_iterator(it, 1)
+        ok_(res[0])
+
+    @check_for_pending_session
+    def test_list_like(self):
+        it = self.admin_mngr.get_list({"name?": "%2%"})
+        ok_(it, "Get list returned an empty value")
+        res = self._go_through_iterator(it, 1)
+        ok_(res[0], "First item is empty!'")
+        ok_(res[0].id == self.id2, "Got the wrong value")
+
+    @check_for_pending_session
+    def test_list_not(self):
+        it = self.admin_mngr.get_list({"~name": self.name1})
+        ok_(it, "Get list returned an empty value")
+        res = self._go_through_iterator(it, 1)
+        ok_(res[0], "First item is empty!'")
+        ok_(res[0].id == self.id2, "Got the wrong value")
+
+    @check_for_pending_session
+    def test_less(self):
+        it = self.admin_mngr.get_list(filters={"id<": self.id2})
+        ok_(it, "Get list returned an empty value")
+        res = self._go_through_iterator(it, 1)
+        ok_(res[0], "First item is empty!'")
+        ok_(res[0].id == self.id1, "Got the wrong value")
+
+    @check_for_pending_session
+    def test_less_equal(self):
+        it = self.admin_mngr.get_list({"id<=": self.id1})
+        ok_(it, "Get list returned an empty value")
+        res = self._go_through_iterator(it, 1)
+        ok_(res[0], "First item is empty!'")
+        print res[0].id
+        ok_(res[0].id == self.id1, "Got the wrong value")
+
+    @check_for_pending_session
+    def test_great(self):
+        it = self.admin_mngr.get_list({"id>": self.id1})
+        ok_(it, "Get list returned an empty value")
+        res = self._go_through_iterator(it, 1)
+        ok_(res[0], "First item is empty!'")
+        ok_(res[0].id == self.id2, "Got the wrong value")
+
+    @check_for_pending_session
+    def test_great_equal(self):
+        it = self.admin_mngr.get_list({"id>=": self.id2})
+        ok_(it, "Get list returned an empty value")
+        res = self._go_through_iterator(it, 1)
+        ok_(res[0], "First item is empty!'")
+        ok_(res[0].id == self.id2, "Got the wrong value")
+
+    @check_for_pending_session
+    def test_list_in(self):
+        it = self.admin_mngr.get_list({"name": [self.name1, self.name2]})
+        ok_(it, "Get list returned an empty value")
+        res = self._go_through_iterator(it, 2)
+        eq_(len(res), 2, "Invalid number of elements")
+        ok_(res[0], "First item is empty!'")
+        ok_(res[1], "Second item is empty!'")
+        ok_(res[0].id == self.id1, "Got the wrong value")
+        ok_(res[1].id == self.id2, "Got the wrong value")
+
+    @check_for_pending_session
+    def test_list_order_by(self):
+        it = self.admin_mngr.get_list(order_by=("id", "desc"))
+        ok_(it, "Get list returned an empty value")
+        res = self._go_through_iterator(it, 2)
+        ok_(res[0], "First item is empty!'")
+        ok_(res[1], "Second item is empty!'")
+        ok_(res[0].id == self.id2, "Got the wrong value")
+        ok_(res[1].id == self.id1, "Got the wrong value")
+
+    @check_for_pending_session
+    def test_limit(self):
+        it = self.admin_mngr.get_list(limit=1)
+        ok_(it, "Get list returned an empty value")
+        res = self._go_through_iterator(it, 1)
+        ok_(res[0], "First item is empty")
+        ok_(res[0].id == self.id1, "Got the wrong value")
+
+    @check_for_pending_session
+    def test_limit_to_zero(self):
+        it = self.admin_mngr.get_list(limit=0)
+        ok_(it, "Get list returned an empty value")
+        res = self._go_through_iterator(it, 0)
+        eq_(len(res), 0, "Should be empty")
+
+    @check_for_pending_session
+    def test_offset(self):
+        it = self.admin_mngr.get_list(offset=1)
+        ok_(it, "Get list returned an empty value")
+        res = self._go_through_iterator(it, 1)
+        ok_(res[0], "First item is empty")
+        ok_(res[0].id == self.id2, "Got the wrong value")
+
+    @check_for_pending_session
+    def test_offset_too_big(self):
+        it = self.admin_mngr.get_list(offset=3)
+        ok_(it, "Get list returned an empty value")
+        self._go_through_iterator(it, 0)
+
+    @check_for_pending_session
+    def test_offset_to_zero(self):
+        it = self.admin_mngr.get_list(offset=0)
+        ok_(it, "Get list returned an empty value")
+        res = self._go_through_iterator(it, 2)
+        ok_(res[0], "First item is empty!'")
+        ok_(res[1], "Second item is empty!'")
+        ok_(res[0].id == self.id1, "Got the wrong value")
+        ok_(res[1].id == self.id2, "Got the wrong value")
+
+    @check_for_pending_session
+    def test_list_empty_in(self):
+        eq_(self.admin_mngr.get_count({"id": []}), 0,
+            "There are items with an empty <in> and shouldn't")
+
+    def test_list_empty_not_in(self):
+        eq_(self.admin_mngr.get_count({"~id": []}),
+            self.admin_mngr.get_count(),
+            "There are no items with an empty <not in> and should")

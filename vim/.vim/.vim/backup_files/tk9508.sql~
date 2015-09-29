@@ -1,0 +1,10 @@
+INSERT INTO auth_permission (name, content_type_id, codename) 
+VALUES ('Can add backup standard addon', 123, 'add_backupstandardaddon'), 
+       ('Can change backup standard addon', 123, 'change_backupstandardaddon'), 
+       ('Can delete backup standard addon', 123, 'delete_backupstandardaddon'),
+       ('Can add backup standard client', 124, 'add_backupstandardclient'), 
+       ('Can change backup standard client', 124, 'change_backupstandardclient'), 
+       ('Can delete backup standard client', 124, 'delete_backupstandardclient'),
+       ('Can add coupon log', 141, 'add_couponlog'), 
+       ('Can change coupon log', 141, 'change_couponlog'), 
+       ('Can delete coupon log', 141, 'delete_couponlog');

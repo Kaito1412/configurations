@@ -1,0 +1,14 @@
+.venv
+*.pyc
+*.py~
+*.py\#
+build
+dist
+.tox
+/Managers.egg-info/
+bin/              
+include/          
+lib/              
+man/              
+pip-selfcheck.json
+

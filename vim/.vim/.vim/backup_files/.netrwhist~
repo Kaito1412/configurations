@@ -1,0 +1,6 @@
+let g:netrw_dirhistmax  =10
+let g:netrw_dirhist_cnt =4
+let g:netrw_dirhist_1='/home/kaito/Workspace/gigas-hostbill/includes/modules/Hosting'
+let g:netrw_dirhist_2='/home/kaito/Documentos/Hostbill4/includes/core/pdo'
+let g:netrw_dirhist_3='/home/kaito/Workspace/personal/configurations'
+let g:netrw_dirhist_4='/home/kaito/.zsh'

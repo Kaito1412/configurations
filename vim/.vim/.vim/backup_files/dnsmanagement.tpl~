@@ -1,0 +1,182 @@
+<script type="text/javascript" src="{$template_dir}javascripts/jquery.sexy-combo.js"></script>
+<link href="{$template_dir}sexy-combo.css" rel="stylesheet" type="text/css" />
+<script>
+    {literal}
+    $(function(){
+        $('#domain-main-details').hide();
+
+        $(".eli a").click(function(){
+            $(".eli a").attr("disabled", "");
+            //Provisional: hide div dns
+            delete_dns = $(this).parent();
+            delete_dns.parent().hide('fast');
+            val = delete_dns.next().children("input[type=text]").val();
+            delete_dns.next().children("input[type=text]").val(val+'-delete').trigger('change');
+            $('#dnsform input[type="submit"]').trigger('click');
+        });
+
+        $('#select-dns-record').change(function(){
+            if($(this).val() == 'MX')
+            {
+                $('.ip').children('label').first().html("Domain/Priority");
+                $('#newrecordip').children('input').first().css('width', '95px');
+                $('input[name=updateDNSmanagement\\[priority\\]]').remove();
+                $('#newrecordip').append($('<input type="text" class="i50" style="width:20px" value="" name="updateDNSmanagement[priority]">'));
+            }
+            else if($(this).val() == 'SRV')
+            {
+                $('.ip').children('label').first().html("prio. wt. port tgt.");
+                $('input[name=updateDNSmanagement\\[priority\\]]').remove();
+                $('#newrecordip').children('input').first().css('width', '');
+            }
+            else if($(this).val() == 'NS' || $(this).val() == 'CNAME'  || $(this).val() == 'TXT')
+            {
+                $('.ip').children('label').first().html("Value");
+                $('input[name=updateDNSmanagement\\[priority\\]]').remove();
+                $('#newrecordip').children('input').first().css('width', '');
+            }
+            else
+            {
+                $('.ip').children('label').first().html("IP");
+                $('input[name=updateDNSmanagement\\[priority\\]]').remove();
+                $('#newrecordip').children('input').first().css('width', '');
+            }
+        });
+    });
+    {/literal}
+</script>
+
+<div class="domain-widget">
+
+<script type="text/javascript" >
+    {literal}
+    $(function () {
+    	$(".combo-s").sexyCombo({
+    		emptyText: "Choose a record",
+    		autoFill: true,
+    		skin: "custom"
+    	});
+
+    	$(".combo-m").sexyCombo({
+    		emptyText: "Choose a record",
+    		autoFill: true,
+    		skin: "custom"
+    	});
+	});
+	{/literal}
+</script>
+
+<div class="dom-head">
+    
+	<h2>
+	    <img alt="dominios" src="{$template_dir}images/metal-dominios.png">
+	    {$details.name}
+    </h2>
+</div>
+
+<div class="tab-wrap">
+	<div class="tabs">
+	    <ul>
+	    	<li><a id="domain-main-details-show" {if !$widget} class="active" {/if} href="#tab">Detalles del dominio</a></li>
+	    	{foreach from=$widgets item=widget name=cst}
+                {if $widget.name != 'contactinfo' && !preg_match('/^dns0[0-9].gigas.com$/i', $details.nameservers[0])}
+                {* NOS SALTAMOS LOS WIDGET PARA DOMINIOS CON DNS EXTERNO *}
+                    {continue}
+                {/if}
+	    	    {if $widget.name !== 'registernameservers' && $widget.name !== 'eppcode'}
+                    <li>
+                        <a {if $widget.name=='dnsmanagement'} class="active" {/if} href="{$ca_url}clientarea/domains/{$details.id}/{$details.name}/&widget={$widget.name}">
+                            {if $widget.name=='contactinfo'}
+                                {$lang.contact}
+                            {elseif $widget.name=='emailforwarding'}
+                                Email
+                            {else}
+                                {if $lang[$widget.name]}{$lang[$widget.name]}{elseif $widget.fullname}{$widget.fullname}{else}{$widget.name}{/if}
+                            {/if}
+                        </a>
+                    </li>
+                {/if}
+            {/foreach}
+	    </ul>
+	    <div id="domain-settings-default">
+	        <div class="formwrap fw2">
+	        	<form class="ts" method="post">
+	        	    <input type="hidden" name="submit" value="1" />
+                    <input type="hidden" name="widgetdo" value="updateDNSmanagement" />
+	        		<div class="tstitle">
+					    <h3>{$lang.newrecord}</h3>
+				    </div>
+				    <p class="domain-info">{$lang.newrecord_info1}</p>
+				    <p class="domain-info">{$lang.newrecord_info2}</p>
+				    <div class="domain-info">
+                        <input type="button" class="ip-btn" value="{$lang.newrecord_autoconf_button}" name="regaction[updateDNSmanagement]" OnClick="$('input[name=updateDNSmanagement\\[autoconfMX\\]]').val('true')"/>
+				        <input type="hidden" name="updateDNSmanagement[autoconfMX]" value="false"/>
+                                    </div>
+				    <div class="dns">
+					    <div class="eli">
+					    </div>
+					    <div>
+						    <label>host</label>
+						    <input type="text" class="i100" value="" name="updateDNSmanagement[newHostName]"/>
+					    </div>
+					    <div class="cmb">
+						    <label>record</label>
+						    <p class="combo-small" style="width:150px">
+					            <select name="updateDNSmanagement[newRecordType]" class="combo-s" id="select-dns-record">
+			                        {foreach from=$DNSmanagement.records item=record}
+                                        <option {if $host.recordtype == $record}selected="selected"{/if}>{$record}</option>
+                                    {/foreach}
+                                </select>
+						    </p>
+					    </div>
+					    <div class="ip" id="newrecordip">
+						    <label>IP</label>
+						    <input type="text" class="i130" value="" name="updateDNSmanagement[newAddress]"/>
+					    </div>
+				    </div>
+				    <div>
+					    <input type="submit" class="ip-btn" value="{$lang.newrecord_add_button}" name="regaction[updateDNSmanagement]">
+				    </div>
+	        	</form>
+	        	
+	        	<form class="ts" method="post" id="dnsform">
+	        	    <input type="hidden" name="submit" value="1" />
+                    <input type="hidden" name="widgetdo" value="updateDNSmanagement" />
+				    <div class="tstitle">
+					    <h3>DNS records</h3>
+				    </div>
+				    <p class="domain-info">{$lang.records_info}</p>
+				        {foreach from=$DNSmanagement.hosts key=number item=host name=frea}
+					        <div class="dns">
+					            <div class="eli">
+					                <a href="#del" class="eliminar">{$lang.remove}</a>
+					            </div>
+				                <div>
+					                <label>host</label>
+					                <input type="text" class="i100" value="{$host.hostname}" name="updateDNSmanagement[HostName{$number}]"/>
+				                </div>
+				                <div class="cmb">
+					                <label>record</label>
+					                <p class="combo-small" style="width:150px">
+				                        <select name="updateDNSmanagement[RecordType{$number}]" class="combo-s">
+		                                    {foreach from=$DNSmanagement.records item=record}
+                                                <option {if $host.recordtype == $record}selected="selected"{/if}>{$record}</option>
+                                            {/foreach}
+                                        </select>
+					                </p>
+				                </div>
+				                <div class="ip">
+				                    <label>Valor</label>
+					                    <input type="text" class="i130" value="{$host.address}" name="updateDNSmanagement[Address{$number}]"/>
+				                </div>
+					        </div>
+				        {/foreach}
+				        <div style="display:none">
+					        <input type="submit" class="ip-btn" value="Actualizar" />
+				        </div>
+	        	</form>
+	        	
+	        </div><!--formwrap-->
+        </div>
+    </div></div>
+</div>

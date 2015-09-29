@@ -1,0 +1,246 @@
+#!/usr/bin/env python
+#-*- coding: utf-8 -*-
+
+import ConfigParser
+import requests
+import datetime
+import pprint
+import time
+import sys
+import os
+
+import cronbase
+from apps.models import Server
+from main.utils import HostbillUtilities
+from django.http import Http404
+
+
+debug_mode = False
+
+
+def debug(message):
+    global debug_mode
+    if debug_mode:
+        print message
+
+
+def rreplace(s, old, new, occurrence):
+    li = s.rsplit(old, occurrence)
+    return new.join(li)
+
+
+def get_config_as_dict():
+    config_file = '{d}/{f}'.format(d=os.path.dirname(os.path.realpath(__file__)),
+                                   f=rreplace(os.path.basename(__file__), '.py', '.cnf', 1))
+    try:
+        with open(config_file):
+            pass
+    except IOError:
+        print "error al leer config"
+        sys.exit(1)
+
+    config = ConfigParser.ConfigParser()
+    config.read(config_file)
+    return config._sections
+
+
+def get_consoles(module_id):
+    consoles = []
+    blacklist = get_config_as_dict()['blacklist'].values()
+    del blacklist[0]
+
+    for server in Server.objects.filter(default_module=module_id).exclude(id__in=blacklist):
+        api = {'url': 'http://{ip}'.format(ip=server.host)}
+        data = {'user': server.username, 'password': HostbillUtilities().decrypt(server.password)}
+        
+        try:
+            response = requests.get(api['url'] + '/token', params=data, verify=False)
+        except requests.exceptions.ConnectionError:
+            raise Http404()
+
+        if response.status_code != 200:
+            try:
+                response = requests.post(api['url'] + '/token', params=data, verify=False)
+            except requests.exceptions.ConnectionError:
+                raise Http404()
+
+        api['token'] = response.json()['token']
+        consoles.append(api)
+
+    return consoles
+
+
+def cloud_is_admin(api, cloud_id):
+    is_admin = False
+
+    payload = {'cloud_id': cloud_id}
+    headers = {'Authorization': 'Gigas token='+api['token']}
+    response = requests.get(api['url'] + '/api_users',
+                            params=payload,
+                            verify=False,
+                            headers=headers)
+
+    try:
+        is_admin = 'admin' in response.json()[0]['roles']
+    except (IndexError, KeyError):
+        pass
+
+    return is_admin
+
+
+def get_deletion_machine(api, label):
+    machine = None
+
+    payload = {'label': label}
+    headers = {'Authorization': 'Gigas token='+api['token']}
+    response = requests.get(api['url'] + '/virtual_machines',
+                            params=payload,
+                            verify=False,
+                            headers=headers)
+
+    try:
+        machine = response.json()[0]
+    except (IndexError, KeyError):
+        pass
+    if machine and not cloud_is_admin(api, machine['cloud_id']):
+        print "Se ha encontrado la maquina %s pero no es del admin en %s !!!" % (machine['id'], api['url'])
+        machine = None
+
+    return machine
+
+
+def machine_is_locked(api, machine_id):
+    machine = None
+
+    payload = {}
+    headers = {'Authorization': 'Gigas token='+api['token']}
+    response = requests.get(api['url'] + '/virtual_machine/' + str(machine_id),
+                            params=payload,
+                            verify=False,
+                            headers=headers)
+    if response.status_code == 200:
+        return response.json()['locked']
+    else:
+        print "error al ver si esta bloqueada"
+        return True
+
+
+def get_disks(api, machine_id, days_since=None, deletion_limit=None):
+
+    payload = {}
+    headers = {'Authorization': 'Gigas token='+api['token']}
+
+    url = '%s/virtual_machine/%s/disks' % (api['url'], machine_id)
+    response = requests.get(url, params=payload, verify=False, headers=headers)
+    disks = response.json() or []
+    if not isinstance(disks, list):
+        disks = []  #muy de vez en cuando response.json() devuelve un string ¿¿??
+
+    disks_to_delete = []
+    if disks and days_since:
+        delta = datetime.timedelta(days=days_since)
+        now = datetime.datetime.now()
+
+        def disk_add_date(disk):
+            disk['_date'] = datetime.datetime.strptime(
+                disk['updated_at'],
+                '%Y-%m-%dT%H:%M:%S'
+            )
+            return disk
+
+        if deletion_limit:
+            limit_reached = lambda disk_list, limit: len(disk_list) == limit
+        else:
+            limit_reached = lambda disk_list, limit: False
+
+        # The `disks` list is sorted by disk ID, which *maybe* match with the
+        # creation date of the disk, but not necessarily, so we sort them by
+        # its update date.
+        disks = sorted(map(disk_add_date, disks), key=lambda d: d['_date'])
+
+        for disk in disks:
+            if limit_reached(disks_to_delete, deletion_limit):
+                break
+            if disk['locked']:
+                continue
+            if delta >= now - disk['_date']:
+                continue
+            disks_to_delete.append(disk)
+
+    return disks_to_delete
+
+
+d = get_config_as_dict()['settings']
+DEFAULT_MODULE = int(d['default_module'])
+MACHINE_LABEL_DELETE_QUEUE = d['machine_label_delete_queue']
+DAYS_SINCE = int(d['days_since'])
+DELETION_LIMIT = int(d['deletion_limit'])
+INTERVAL_BETWEEN = int(d['interval_between'])
+del d
+
+args = sys.argv[1:]
+
+dry_mode = 'dry' in args
+if dry_mode:
+    print "********** DRY MODE **********"
+
+debug_mode = 'debug' in args
+debug("********** DEBUG MODE **********")
+
+consoles = get_consoles(DEFAULT_MODULE)
+
+for n, console in enumerate(consoles):
+    consoles[n]['del_machine'] = get_deletion_machine(console, MACHINE_LABEL_DELETE_QUEUE)
+    consoles[n]['disks'] = get_disks(console, consoles[n]['del_machine']['id'], DAYS_SINCE, DELETION_LIMIT) if consoles[n]['del_machine'] else []
+
+debug("Información de las consolas:\n %s" % pprint.pformat(consoles))
+
+for console in consoles:
+    s = 0
+    if console['disks']:
+        print "En la consola {consola} voy a borrar estos discos:".format(consola=console['url']), [disk['id'] for disk in console['disks']]
+    else:
+        print "En la consola {consola} no hay discos que borrar.".format(consola=console['url'])
+
+    for disk in console['disks']:
+
+        if s > 0:
+            time.sleep(INTERVAL_BETWEEN)
+        s = s+1
+
+        headers = {'Authorization': 'Gigas token='+console['token']}
+
+        if machine_is_locked(console, console['del_machine']['id']):
+            print "maquina bloqueada. la desbloqueo"
+            url = console['url'] + '/virtual_machine/{vm_id}/unlock'.format(vm_id=console['del_machine']['id'])
+            params = {}
+
+            if not dry_mode:
+                response = requests.post(
+                    url,
+                    data=params,
+                    verify=False,
+                    headers=headers,
+                )
+                print "POST %s %s %s" % (url, params, response.status_code)
+                debug(pprint.pformat(response.json()))
+            else:
+                print url
+        else:
+            print "maquina no bloqueada. ok"
+
+        payload = {}
+        url = console['url'] + '/disk/{disk}'.format(disk=disk['id'])
+        if not dry_mode:
+            response = requests.delete(
+                url,
+                params=payload,
+                verify=False,
+                headers=headers
+            )
+            print "DELETE %s %s %s - updated_at = %s" % (url, response.status_code, response.json(), str(disk['_date']))
+        else:
+            print "DELETE %s - updated_at = %s" % (url, str(disk['_date']))
+
+print "####"
+print "task finished"
