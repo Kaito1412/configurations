@@ -3,13 +3,14 @@ Plug 'tpope/vim-sensible'
 Plug 'ctrlpvim/ctrlp.vim'
 Plug 'scrooloose/syntastic'
 Plug 'tpope/vim-fugitive'
-Plug 'shawncplus/phpcomplete.vim'
 Plug 'airblade/vim-gitgutter'
 Plug 'bling/vim-airline'
 Plug 'rking/ag.vim'
+Plug 'othree/html5.vim'
+Plug 'Valloric/YouCompleteMe'
+Plug 'pangloss/vim-javascript'
 call plug#end()
 
-"Plug 'Valloric/YouCompleteMe', {'do': './install.sh --clang-completer --system-libclang'}
 
 set mouse=a
 set backup
