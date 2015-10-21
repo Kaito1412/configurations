@@ -3,16 +3,18 @@ Plug 'tpope/vim-sensible'
 Plug 'ctrlpvim/ctrlp.vim'
 Plug 'scrooloose/syntastic'
 Plug 'tpope/vim-fugitive'
-Plug 'Valloric/YouCompleteMe', {'do': './install.sh --clang-completer --system-libclang'}
 Plug 'airblade/vim-gitgutter'
 Plug 'bling/vim-airline'
 Plug 'rking/ag.vim'
-
+Plug 'othree/html5.vim'
+Plug 'Valloric/YouCompleteMe'
+Plug 'pangloss/vim-javascript'
 call plug#end()
 
 set mouse=a
 set backup
 set number
+set relativenumber
 set expandtab
 set shiftwidth=4
 set softtabstop=4
@@ -43,12 +45,23 @@ inoremap <up>    <nop>
 inoremap <down>  <nop>
 inoremap <left>  <nop>
 inoremap <right> <nop>
+inoremap <LeftMouse> <nop>
+inoremap <2-LeftMouse> <nop>
+inoremap <3-LeftMouse> <nop>
+inoremap <4-LeftMouse> <nop>
+nnoremap <LeftMouse> <nop>
+nnoremap <2-LeftMouse> <nop>
+nnoremap <3-LeftMouse> <nop>
+nnoremap <4-LeftMouse> <nop>
 
 set statusline+=%#warningmsg#
 set statusline+=%{SyntasticStatuslineFlag()}
 set statusline+=%*
 
+let g:airline_powerline_fonts = 1
 let g:syntastic_always_populate_loc_list = 1
 let g:syntastic_auto_loc_list = 1
 let g:syntastic_check_on_open = 1
 let g:syntastic_check_on_wq = 0
+
+filetype plugin on

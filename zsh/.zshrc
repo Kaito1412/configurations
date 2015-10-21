@@ -27,20 +27,24 @@ autoload -U colors && colors
 compinit
 promptinit
 
-bindkey "^[[3~"          delete-char
-bindkey "^[3;5~"         delete-char
-bindkey '\e[1~'   beginning-of-line
-bindkey '\e[4~'   end-of-line
-bindkey "^e[5~" beginning-of-history
-bindkey "^e[6~" end-of-history
-bindkey '\e[2~'   overwrite-mode
-bindkey "^e[5C" forward-word
-bindkey "^eOc" emacs-forward-word
-bindkey "e[5D" backward-word
-bindkey "eOd" emacs-backward-word
-bindkey "ee[C" forward-word
-bindkey "ee[D" backward-word
-bindkey "^H" backward-delete-word
+bindkey "^[[3~"  delete-char
+bindkey "^[3;5~" delete-char
+bindkey '\e[1~'  beginning-of-line
+bindkey '\e[4~'  end-of-line
+bindkey "^e[5~"  beginning-of-history
+bindkey "^e[6~"  end-of-history
+bindkey '\e[2~'  overwrite-mode
+bindkey "^e[5C"  forward-word
+bindkey "^eOc"   emacs-forward-word
+bindkey "e[5D"   backward-word
+bindkey "eOd"    emacs-backward-word
+bindkey "ee[C"   forward-word
+bindkey "ee[D"   backward-word
+bindkey "^H"     backward-delete-word
+
+#Binding with control key
+bindkey '^a'  beginning-of-line
+bindkey '^e'     end-of-line
 
 # Allow for functions in the prompt.
 setopt PROMPT_SUBST
