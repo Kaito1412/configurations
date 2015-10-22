@@ -1,0 +1,85 @@
+<?php
+
+#require __DIR__.'/../config.php';
+#
+#$dry_mode = true;
+#
+#/*
+#$db_host = '10.0.32.13';
+#$db_user = 'toni.valverde';
+#$db_pass = 'my$$';
+#$db_name = 'hb_abel';
+#*/
+#
+#if(count($argv)!=3 ){
+#    printf("Error: usage ---> php %s %s %s \n", __FILE__, "cupones.txt", "promocion");
+#    die();
+#}
+#
+#$file = $argv[1];
+#$nuevo_tipo = $argv[2];
+#
+#$contador = 0;
+#$contador_modificados = 0;
+#$contador_ya_asignados = 0;
+#$contador_desconocidos = 0;
+#$contador_defectuosos = 0;
+#
+#
+#
+#if($dry_mode)
+#{
+#    echo "DRY MODE -- no tocamos la base de datos\n";
+#}
+#
+#// Create connection
+#$db= new mysqli($db_host, $db_user, $db_pass, $db_name);
+#if($db->connect_errno > 0){
+#    die('Unable to connect to database [' . $db->connect_error . ']');
+#}
+#
+#$lineas = file($file);
+#
+#foreach($lineas as $linea)
+#{
+#    $coupon_code =  trim($linea);
+#
+#    print "procesando cupon $coupon_code\n";
+#
+#    $sql = "select c.id as id, gce.type as tipo from hb_coupons c, gigas_coupons_extradetails gce where c.code='$coupon_code' and c.id=gce.coupon_id";
+#    if(!$results = $db->query($sql)){
+#        die('There was an error running the query [' . $db->error . ']');
+#    }
+#
+#    if ($result = $results->fetch_assoc())
+#    {
+#        if(!$result['tipo'])
+#        {
+#            $couponid = $result['id'];
+#            $sql = "update gigas_coupons_extradetails set type='$nuevo_tipo' where coupon_id='$couponid' \n";
+#            if($dry_mode == false) $db->query($sql);
+#            echo $sql;
+#            echo "\n\n";
+#            $contador_modificados++;
+#        }else{
+#            echo "(!) el cupon $coupon_code no lo toco. ya tiene promocion: ".$result['tipo']."\n"; 
+#            $contador_ya_asignados++;
+#        }
+#    }else{
+#        $sql = "select id from hb_coupons where code='$coupon_code' ";
+#        if(!$results = $db->query($sql)){
+#            die('There was an error running the query [' . $db->error . ']');
+#        }
+#        if($results->num_rows > 0)
+#        {
+#            echo "(!!!) el cupon $coupon_code no tiene extradetail. no lo proceso.\n";
+#            $contador_defectuosos++;
+#        }else{
+#            echo "(!!) el cupon ".trim($linea)." no existe en la base de datos. no lo proceso.\n";
+#            $contador_desconocidos++;
+#        }
+#    }
+#    $contador++;
+#}
+#
+#echo "\n\nProcesamiento terminado. $contador cupones procesados, $contador_modificados asignados a la promo $nuevo_tipo, $contador_desconocidos no reconocidos, $contador_defectuosos defectuosos y $contador_ya_asignados no tocados porque ya están asignados\n\n";

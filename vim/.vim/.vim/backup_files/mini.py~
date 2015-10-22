@@ -1,0 +1,32 @@
+from managers.exceptions import ManagerException
+
+def can_allocate_ip(resource_manager, network_id):
+    """
+    can it add a new ip on the network?
+    """
+    return resource_manager.can_create_ip(network_id)
+
+def has_network_group(resource_manager, group_id):
+    """
+    can it use a network_group?
+    """
+    try:
+        res = (resource_manager
+               .get_object({"group_id": group_id,
+                            "resource_type": "NetworkGroup"}))
+    except ManagerException:
+        res = False
+    return bool(res)
+
+def is_usable_ip(resource_manager, group_id):
+    "is usable"
+    pass
+
+def can_allocate_ip_on_group(resource_manager, group_id):
+    """
+    can it add an ip to the network group
+    """
+    res = False
+    if has_network_group(resource_manager, group_id):
+        res = resource_manager.can_create_ip_on_group(group_id)
+    return res

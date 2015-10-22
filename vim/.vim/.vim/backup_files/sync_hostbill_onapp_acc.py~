@@ -1,0 +1,168 @@
+#!/usr/bin/env python
+#-*- coding: utf-8 -*-
+
+'''
+sincroniza el email de los clientes de los accounts de hostbill con los de onapp
+'''
+import sys
+import requests
+import ConfigParser
+import argparse
+import phpserialize
+from datetime import datetime
+import cronbase
+
+from main.utils import HostbillUtilities
+from accounts.models import Account
+from accounts.models import AccountExtraDetail
+from apps.models import Server
+from django.http import Http404
+
+
+def get_login_from_account(account):
+    try:
+        extra_details = phpserialize.loads(account.extra_details)
+    except ValueError as e:
+        return False
+
+    login = extra_details.get('option100', False)
+    return login
+
+
+'''
+leer config
+'''
+config = ConfigParser.ConfigParser()
+fileconfig = __file__.replace('.py', '.cnf')
+try:
+    config.readfp(open(fileconfig))
+except Exception as e:
+    print("ERROR. No he podido leer la config.")
+    sys.exit()
+
+config = config._sections['config']
+
+CATEGORY_SLUGS = config['category_slugs'].split(',')
+NUM_ACCOUNTS_SYNCED = int(config['num_accounts_synced'])
+
+print("Configuracion:", "categories", CATEGORY_SLUGS, "num_accounts_synced", NUM_ACCOUNTS_SYNCED)
+
+'''
+leer parametros pasados por linea de comandos
+'''
+parser = argparse.ArgumentParser(description="Sincroniza los emails de las cuentas de cloud con las de hostbill.")
+parser.add_argument("--run-dry", help="run dry", action="store_true")
+args = parser.parse_args()
+
+RUN_DRY = args.run_dry
+if RUN_DRY:
+    print("\n************** RUN DRY *************\n")
+
+'''
+sacamos los ultimos X accounts ordenados por los que lleven mas tiempo
+desincronizados contra onapp y luego por fecha de creacion.
+'''
+accounts = Account.objects.filter(
+    status='Active',
+    product_id__category_id__slug__in=CATEGORY_SLUGS,
+).order_by('accountextradetail__onapp_synced_at', 'date_created')[:NUM_ACCOUNTS_SYNCED]
+
+changed = 0
+tokens = {}
+
+for account in accounts:
+
+    print("\nProcesando account {id}".format(id=account.id))
+
+    try:
+        account.accountextradetail.onapp_synced_at = datetime.now()
+        if not RUN_DRY:
+            account.accountextradetail.save(update_fields=['onapp_synced_at'])
+    except AccountExtraDetail.DoesNotExist:
+        new_extra = AccountExtraDetail(
+            account=account,
+            updated_at=None,
+            onapp_synced_at=datetime.now(),
+        )
+        if not RUN_DRY:
+            new_extra.save()
+        print("Añadiendo un extradetail al account {0}".format(account.id))
+
+    try:
+        username = account.server_id.username
+    except Server.DoesNotExist:
+        print("El account {a} no tiene un server asociado. Lo salto.".format(a=account.id))
+        continue
+    
+    password = HostbillUtilities().decrypt(account.server_id.password)
+    host = account.server_id.host
+
+    login = get_login_from_account(account)
+    if login is False:
+        print("no he podido encontrar el usuario")
+        continue
+
+    if account.server_id.id in tokens:
+        token = tokens[account.server_id.id]
+    else:
+        url = 'http://{host}/token'.format(host=host)
+        try:
+            r = requests.get(url, params={'user': username, 'password': password})
+        except requests.exceptions.ConnectionError:
+            raise Http404()
+
+        if r.status_code != 200:
+            try:
+                r = requests.post(url, params={'user': username, 'password': password})
+            except requests.exceptions.ConnectionError:
+                raise Http404
+
+        token = r.json()['token']
+        tokens[account.server_id.id] = token
+
+    url = 'http://{host}/api_users'.format(host=host)
+    headers = {'Authorization': 'Gigas token={token}'.format(token=token)}
+    payload = {'login': login}
+
+    r = requests.get(url, headers=headers, params=payload)
+    if r.status_code != 200:
+        print("no he podido encontrar el usuario")
+        continue
+
+    try:
+        api_user_id = r.json()[0]['id']
+        email = r.json()[0]['email']
+    except (IndexError, KeyError):
+        print("no he podido encontrar el usuario")
+        continue
+
+    if email == account.client_id.email:
+        print("el email no ha cambiado")
+        continue
+    else:
+        print("El email de hostbill es {e_h}, el del cloud es {e_c}".format(
+            e_h=account.client_id.email,
+            e_c=email))
+
+    '''
+    cambiamos el email en onapp porque esta desfasado
+    '''
+    payload = {u'email': account.client_id.email}
+    url = 'http://{host}/api_user/{id}'.format(host=host, id=api_user_id)
+    if RUN_DRY is False:
+        r = requests.put(url, headers=headers, data=payload)
+        if r.status_code != 200:
+            print("No he podido sincronizar email")
+            continue
+        print("Email actualizado a {email}".format(email=email))
+        print("El nuevo email es {n}".format(n=r.json()['email']))
+    else:
+        print("No cambiado. RUN_DRY MODE")
+    changed = changed + 1
+
+
+print("\nProceso finalizado. {changed} {emails} cambiados. {c} comprobados".format(
+    changed=changed,
+    emails='email' if changed == 1 else 'emails',
+    c=NUM_ACCOUNTS_SYNCED
+))

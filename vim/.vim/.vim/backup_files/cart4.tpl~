@@ -1,0 +1,304 @@
+{php}die("hola");$this->assign('globals', $GLOBALS);{/php}
+{* MULTICURRENCY *}
+{php}
+require_once "includes/modules/Other/gigasmcp/Multicurrency.php";
+$mu = new Multicurrency();
+foreach($mu->convert($this->get_template_vars()) as $k=>$v) $this->assign($k, $v);
+{/php}
+{* END MULTICURRENCY *}
+{if $logged == 0}{literal}
+<script type="text/javascript">
+    window.location.href = '/panel';
+</script>
+{/literal}{/if}
+<script type="text/javascript" src="{$template_dir}js/fancybox/jquery.fancybox-1.3.4.pack.js"></script>
+<link rel="stylesheet" href="{$template_dir}js/fancybox/jquery.fancybox-1.3.4.css" type="text/css" media="screen" />
+{assign var=hide_bankt value=true}
+{if !empty($subtotal.recurring)}
+    {foreach from=$subtotal.recurring key=cycle item=rec}
+        {if $cycle == "a"}
+            {assign var=hide_bankt value=false}
+            {break}
+        {/if}
+    {/foreach}
+{/if}{if $hide_bankt}
+<script>
+{literal}
+    $(function() {
+        $('[id*=transferencia]').parent().hide();
+    })
+{/literal}
+</script>
+{/if}
+<script>
+var lang = {literal}{{/literal}
+    "apply_tos": "{$lang.apply_tos}",
+{literal}};{/literal}
+</script>
+<script src="templates/orderpages/js/cart4.js"></script>
+<section id="thestuff-fw">
+    <div class="tablewrap-full">
+        <h2 class="bbb h2cen">{$lang.ordersummary}</h2>
+        <table>
+            <tr>
+                <th>{$lang.Description}</th>
+                <th> {$lang.setupfee}</th>
+                <th>{$lang.price}</th>
+            </tr>
+            {if $product}
+            <tr>
+                {assign var=catname value=$contents[0].category_name}
+                {assign var=prodname value=$contents[0].name}
+                <td>{if $product.id == $globals.products_config.vlan.id && $lang.vlans_service_name}{$lang.vlans_service_name}{elseif $lang[$catname]}{$lang[$catname]}{else}{$contents[0].category_name}{/if} - <strong>{if $lang[$prodname]}{$lang[$prodname]}{else}{$contents[0].name}{/if}</strong> {if $contents[2][0]}({$contents[2][0].name}){/if}<br/>
+                </td>
+                <td>{if $contents[0].setup!=0}{$contents[0].setup|price:$currency}{else}-{/if}</td>
+                <td>{if $contents[0].price==0}<strong>{$lang.Free}</strong>{elseif $contents[0].prorata_amount}
+                    <strong> {$contents[0].prorata_amount|price:$currency}</strong>
+                    ({$lang.prorata} {$contents[0].prorata_date|dateformat:$date_format}){else}<strong>{$contents[0].price|price:$currency}</strong>{/if}</td>
+            </tr>
+            {/if}
+
+            {if $cart_contents[1]}
+            {foreach from=$cart_contents[1] item=cstom2}
+            {foreach from=$cstom2 item=cstom name=foo}
+            {if $cstom.total>0}
+            <tr {if $smarty.foreach.foo.index%2 == 0}class="odd"{/if}>
+                <td><span class="translate">{$cstom.fullname}</span>  {if $cstom.qty>1}x {$cstom.qty}{/if}<br/>
+                </td>
+                <td>
+                    {if $cstom.setup!=0}{$cstom.setup|price:$currency}{else}-{/if}
+                </td>
+                <td>
+                    {if $cstom.price==0}{$lang.Free}{elseif $cstom.prorata_amount}{$cstom.prorata_amount|price:$currency}{else}{$cstom.price|price:$currency}{/if}
+                </td>
+            </tr>
+            {/if}
+            {/foreach}
+            {/foreach}
+            {/if}
+
+            {if $contents[3]}
+
+            {foreach from=$contents[3] item=addon}
+            <tr >
+                <td>{$lang.addon} <span class="black">{if $lang[$addon.name]}{$lang[$addon.name]}{else}{$addon.name}{/if}</span></td>
+                <td  align="center">{if $addon.setup!=0}{$addon.setup|price:$currency}{else}-{/if}</td>
+                <td align="center">{if $addon.price==0}<strong>{$lang.Free}</strong>{elseif $addon.prorata_amount}<strong>{$addon.prorata_amount|price:$currency}</strong> ({$lang.prorata} {$addon.prorata_date|dateformat:$date_format}){else}<strong>{$addon.price|price:$currency}</strong>{/if}</td>
+            </tr>
+            {/foreach}
+            {/if}
+            {if $product}
+            <tr >
+                <td><a href="{$ca_url}cart&amp;step=3"  class="fs11">{$lang.edit_config}</a> {if !$contents[2] && $contents[0].domainoptions}<a href="{$ca_url}cart&amp;step=1"  class="fs11">{$lang.add_domain}</a>{/if}</td>
+                <td colspan="2"></td>
+            </tr>
+            {/if}
+            {if $contents[2] && $contents[2][0].action!='own'}
+            {foreach from=$contents[2] item=domenka key=kk name=foo}
+            <tr {if $smarty.foreach.foo.index%2 == 0}class="odd"{/if}>
+                <td>
+                    <strong>{if $domenka.action=='register'}{$lang.domainregister}{elseif $domenka.action=='transfer'}{$lang.domaintransfer}{/if}</strong> - {$domenka.name} - {$domenka.period} {$lang.years}
+                    {if $domenka.dns}&raquo; {$lang.dnsmanage} (+ {$domenka.dns|price:$currency})<br/>{/if}
+                    {if $domenka.idp}&raquo; {$lang.idprotect}(+ {$domenka.idp|price:$currency})<br/>{/if}
+                    {if $domenka.email}&raquo; {$lang.emailfwd} (+ {$domenka.email|price:$currency})<br/>{/if}
+                    <ul class="actions">
+                        <li><a href="{$ca_url}cart&amp;step=2" class="configurar">{$lang.config_extras}</a></li>
+                        <li><a style="color: rgb(204, 0, 0);"  href="{$ca_url}cart&amp;step=4&amp;removedomain=true&key={$kk}"  class="eliminar">{$lang.remove}</a></li>
+                    </ul>
+                </td>
+                <td>{$lang.no_charge}</td>
+                <td><strong>{$domenka.price|price:$currency}</strong></td>
+            </tr>
+            {/foreach}
+            {/if}
+
+
+            {if $tax}
+
+            <tr>
+                <td>{$lang.subtotal}</td>
+                <td></td>
+                <td>{$tax.subtotal|price:$currency}</td>
+            </tr>
+
+            {if $subtotal.coupon}
+            <tr >
+                <td>{$lang.discount}</td>
+                <td></td>
+                <td><strong>- {$subtotal.discount|price:$currency}</strong></td>
+            </tr>
+            {/if}
+
+            {if $tax.tax1 && $tax.taxed1!=0}
+            <tr >
+                <td>{$tax.tax1name} @ {$tax.tax1}%  </td>
+                <td></td>
+                <td>{$tax.taxed1|price:$currency}</td>
+            </tr>
+            {/if}
+
+            {if $tax.tax2  && $tax.taxed2!=0}
+            <tr >
+                <td>{$tax.tax2name} @ {$tax.tax2}%  </td>
+                <td></td>
+                <td>{$tax.taxed2|price:$currency}</td>
+            </tr>
+            {/if}
+
+            {if $tax.credit!=0}
+            <tr>
+                <td><strong>{$lang.credit}</strong> </td>
+                <td></td>
+                <td><strong>{$tax.credit|price:$currency}</strong></td>
+            </tr>
+            {/if}
+
+            {elseif $credit}
+            {if  $credit.credit!=0}
+            <tr>
+                <td><strong>{$lang.credit}</strong> </td>
+                <td></td>
+                <td><strong>{$credit.credit|price:$currency}</strong></td>
+            </tr>
+            {/if}
+
+            {if $subtotal.coupon}
+            <tr >
+                <td>{$lang.discount}</td>
+                <td></td>
+                <td><strong>- {$subtotal.discount|price:$currency}</strong></td>
+            </tr>
+            {/if}
+            <tr>
+                <td>{$lang.subtotal}</td>
+                <td></td>
+                <td>{$subtotal.total|price:$currency}</td>
+            </tr>
+            {else}
+            {if $subtotal.coupon}
+            <tr >
+                <td>{$lang.discount}</td>
+                <td></td>
+                <td><strong>- {$subtotal.discount|price:$currency}</strong></td>
+            </tr>
+            {/if}
+            <tr>
+                <td>{$lang.subtotal}</td>
+                <td></td>
+                <td>{$subtotal.total|price:$currency}</td>
+            </tr>
+
+            {/if}
+
+            {if !empty($tax.recurring)}
+            <tr >
+                <td>{$lang.total_recurring}</td>
+                <td></td>
+                <td> {foreach from=$tax.recurring item=rec key=k}
+                    {$rec|price:$currency} {$lang.$k}<br/>
+                    {/foreach} </td>
+            </tr>
+
+            {elseif !empty($subtotal.recurring)}
+            <tr >
+                <td>{$lang.total_recurring}</td>
+                <td></td>
+                <td> {foreach from=$subtotal.recurring item=rec key=k}
+                    {$rec|price:$currency} {$lang.$k}<br/>
+                    {/foreach} </td>
+            </tr>
+            {/if}
+            <tr>
+                <td>
+                    {if $subtotal.coupon}
+                    {else}
+                    <div ><a href="#" onclick="$(this).hide();$('#promocode').show();return false;"><strong>{$lang.addcoupon}</strong></a></div>
+                    <div id="promocode" style="display:none;">
+                        <form action="" method="post" id="promoform">
+                            <input type="hidden" name="addcoupon" value="true" />
+
+                            {$lang.usecoupon}: <input type="text" class="i150" name="promocode"/> <input type="submit" value="OK"/></form>
+                    </div>
+                    {/if}
+                </td>
+                <td class="ri">{$lang.total_today}</td>
+                <td class="green">
+                    {if $tax}
+                    {$tax.total|price:$currency}
+                    {elseif $credit}
+                    {$credit.total|price:$currency}
+                    {else}
+                    {$subtotal.total|price:$currency}
+                    {/if}
+                </td>
+            </tr>
+        </table>
+
+
+    </div>
+    <div class="tablewrap-full">
+        <h2 class="bbb h2cen">{$lang.choose_payment}</h2>
+
+        <form action="" method="post" onsubmit='$("#checkout").addLoader();' name="checkoutform">
+            <input type="hidden" name="make" value="step4" />
+            {*<!--{if $tax && $tax.total==0}style="display:none"{elseif $credit && $credit.total==0}style="display:none"{elseif $subtotal.total==0}style="display:none"{/if}-->*}
+            {if $gateways}
+            {assign var="gateways_ul_class" value='class="chc-pago-line"'}
+            {assign var="gateways_cart4" value="true"}
+            {include file="gateways.tpl"}
+            {*<!--<ul class="chc-pago-line">
+                   {foreach from=$gateways item=module key=mid name=payloop}
+                        {if $module|lower !== 'domiciliacion/direct debit'}
+                            <li id="{$module|lower}">
+                                <label>
+                                    <input type="radio" name="gateway" value="{$mid}" {if $submit && $submit.gateway==$mid||$mid==$paygateid}checked="checked"{elseif           $smarty.foreach.payloop.first}checked="checked"{/if}/> {$module}
+                                </label>
+                            </li>
+                        {/if}
+                {/foreach}
+             </ul>-->*}
+            {/if}
+        </div>
+        {if $logged=="1"}
+        <div class="tablewrap-full">
+            <h2>{$lang.ContactInfo}</h2>
+            <div class="tab">
+                {include file=drawclientinfo.tpl}
+            </div>
+            {else}
+            <div class="wbox">
+                <div class="wbox_header">
+                    <strong>{$lang.ContactInfo}</strong>
+                    <ul class="wbox_menu">
+                        <li {if !isset($submit) || $submit.cust_method=='newone'}class="bgon2"{else}class="bgoff2"{/if}>
+                        <input type="radio" name="cust_method" value="newone" {if !isset($submit) || $submit.cust_method=='newone'}checked='checked'{/if}  onclick="{literal}ajax_update('index.php?cmd=signup',{layer:'ajax'},'#updater',true);$(this).parent().parent().find('li.bgon2').removeClass('bgon2').addClass('bgoff2');$(this).parent().removeClass('bgoff2').addClass('bgon2');{/literal}" />
+                        {$lang.newclient}</li>
+                        <li {if $submit.cust_method=='login'}class="bgon2"{else}class="bgoff2"{/if}>
+                        <input type="radio" name="cust_method" value="login" {if $submit.cust_method=='login'}checked='checked'{/if} onClick="{literal}ajax_update('index.php?cmd=login',{layer:'ajax'},'#updater',true);$(this).parent().parent().find('li.bgon2').removeClass('bgon2').addClass('bgoff2');$(this).parent().removeClass('bgoff2').addClass('bgon2');{/literal}" />
+                        {$lang.alreadyclient}</li>
+                    </ul>
+                </div>
+                <div class="wbox_content">
+                    <div id="updater" >
+                        {if $submit.cust_method=='login'}
+                        {include file="ajax.login.tpl"}
+                        {else}
+                        {include file="ajax.signup.tpl"}
+                        {/if}
+                    </div>
+                </div>
+            </div>
+            {/if}
+            {if $tos}
+            <div class="tos tos2">
+                <input type="checkbox" value="1" name="tos" tabindex="30"/> {$lang.tos1} <a href="{$lang.tos_url}" target="_blank" id="a-tos">{$lang.tos2}</a>
+            </div>
+            {/if}
+            <div id="checkout">
+                <input type="submit" value="{$lang.checkout}" name="btn_checkout"/>
+                <input type="submit" value="{$lang.clear_cart}" name="clear"/>
+            </div>
+            {securitytoken}
+        </form>
+    </div>
+</section>

@@ -1,0 +1,124 @@
+<?php
+
+//when true it will switch on error_reporting for HostBill
+//$enable_debug = true;
+$enable_debug = false;
+
+if($enable_debug == true)
+{
+    error_reporting(-1);
+    ini_set('display_errors', 'On');
+}
+
+define('KEY_MCRYPT_RIJNDAEL_128', "f92be113d60ccf765857362a23614b202840e93b89f88b2736698e609a334c3e");
+/*
+ * LOAD PRODUCT IDS
+ */
+if(file_exists(dirname(__FILE__) . '/products_config.php')) require_once(dirname(__FILE__) . '/products_config.php');
+
+
+/*
+ * Include gigasutils path
+ */
+$gigasutils_path = APPDIR_MODULES . "Other/gigasutils";
+$include_path = ini_get('include_path');
+if (strpos($include_path, $gigasutils_path) === false) {
+    ini_set('include_path', $include_path . PATH_SEPARATOR . $gigasutils_path);
+}
+
+
+/*
+ * HOSTBILL CONFIGURATION: BASIC SETTINGS:
+ */
+
+// Database host / default: localhost
+$db_host = 'db_mysql';
+// Database name
+$db_name = 'hostbill';
+// Database username
+$db_user = 'root';
+// Database password
+$db_pass = 'root';
+
+/*
+// Database host / default: localhost
+$db_host = '10.0.32.12';
+// Database name
+$db_name = 'hostbill';
+// Database username
+$db_user = 'toni.valverde';
+// Database password
+$db_pass = 'my$$';
+ */
+
+// Please enter here Credit Card Encryption Hash used to encode credit cards details in Database. Use only ASCII letters and digits
+$ccEncryptionHash = '2113d0cf0964c78569c0747b501382a7';
+
+
+/*
+ * ADVANCED SETTINGS:
+ */
+
+// Additional security settings:  http://wiki.hostbillapp.com/index.php?title=Additional_security
+
+//Admininstrator folder name, default is admin
+$hb_admin_folder='admin';
+
+//Absolute location of templates_c dir - leave false for default
+$hb_templates_c_dir = false;
+
+//Absolute location of attachments dir - leave false for default
+$hb_attachments_dir = false;
+
+//Absolute location of downlods dir - leave false for default
+$hb_downloads_dir = false;
+
+// Advanced DB settings:
+//Database Port
+$db_port = '3306';
+//Database Engine - mysql is default
+$db_engine = 'mysql';
+
+
+// Local credentials
+if (array_key_exists('HTTP_HOST', $_SERVER)) {
+    switch ($_SERVER['HTTP_HOST']) {
+    case 'toni.gigas.local':
+        $db_host = 'localhost';
+        $db_name = 'hb4_toni';
+        $db_user = 'root';
+        $db_pass = 'pass';
+        break;
+    case 'guille.gigas.local':
+        $db_host = 'localhost';
+        $db_name = 'hb_guille_upgrade';
+        $db_user = 'toni.valverde';
+        $db_pass = 'my$$';
+        break;
+    case 'asier.gigas.local':
+        $db_host = '127.0.0.1';
+        $db_name = 'hbillukz';
+        $db_user = 'asier';
+        $db_pass = 'asier';
+        break;
+    }
+}
+
+
+// Exceptions handler
+function gigas_exception_handler($exception) {
+    $admin = hbm_logged_admin();
+    $error_message = $exception->getMessage();
+    if (!empty($error_message)) {
+        hbm_log_error($error_message);
+    }
+    if (!empty($admin)) {
+        Engine::singleton( )->addError($error_message);
+        Utilities::redirect('?' . $_SERVER['QUERY_STRING']);
+    } else {
+        header('Location: /error/500.html');
+    }
+    return true;
+}
+
+set_exception_handler('gigas_exception_handler');

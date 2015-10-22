@@ -1,0 +1,31 @@
+'use strict';
+
+/**
+ * @ngdoc overview
+ * @name 04TodoApp
+ * @description
+ * # 04TodoApp
+ *
+ * Main module of the application.
+ */
+angular
+  .module('04TodoApp', [
+    'ngAnimate',
+    'ngCookies',
+    'ngResource',
+    'ngRoute',
+    'ngSanitize',
+    'ngTouch',
+    'ui.sortable'
+  ])
+  .config(function ($routeProvider) {
+    $routeProvider
+      .when('/', {
+        templateUrl: 'views/main.html',
+        controller: 'MainCtrl',
+        controllerAs: 'main'
+      })
+      .otherwise({
+        redirectTo: '/'
+      });
+  });

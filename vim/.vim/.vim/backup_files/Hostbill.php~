@@ -1,0 +1,863 @@
+<?php
+
+/**
+ * DEPRECATED - use `GApiWrapper` from includes/core/class.gapiwrapper.php
+ */
+class HostbillApi
+{
+    const DEFAULT_GROUP_ID = 1;
+
+    var $api;
+    var $types = array('product', 'products', 'categories', 'details', 'server',
+        'servers', 'accounts', 'client', 'invoice', 'addon', 'invoices',
+        'orders');
+
+    public function __construct()
+    {
+        $this->api = new ApiWrapper();
+        $this->db = Engine::singleton()->getObject("db");
+    }
+
+    private function findType($response)
+    {
+        foreach($this->types as $respType)
+        {   
+            if(isset($response[$respType]) and is_array($response[$respType]))
+            {   
+                return $respType;
+            }
+        }
+    }
+
+    private function callMethod($name, $arguments)
+    {
+        if(count($arguments) == 0) $arguments = array(null);
+        $response = call_user_func_array(array($this->api, $name), array($arguments[0]));
+        if($response === false)
+        {
+            $response = array();
+        }
+        $type = $this->findType($response);
+
+        //check if the call has pagination and wasn't asked for a page
+        if(array_key_exists('totalpages', $response) and $response['totalpages'] > 1 and !array_key_exists('page', $arguments[0]))
+        {
+            $data = $response[$type];
+
+            //merge responses
+            for($i=1; $i < $response['totalpages']; $i++)
+            {
+                $args = $arguments[0];
+                $args['page'] = $i;
+                $response = $this->api->$name($args);
+                $new_data = $response[$type];
+                $data = array_merge($data, $new_data);
+            }
+
+            $response[$type] = $data;
+        }
+
+        #file_put_contents('/tmp/api.log', print_r($response, true), FILE_APPEND);
+        if(empty($type) and array_key_exists('success', $response) and intval($response['success']) == 1) return $response;
+        if(array_key_exists('success', $response) and intval($response['success']) != 1) return array();
+        return $response[$type];
+    }
+
+    public function __call($name, $arguments)
+    {
+        try
+        {
+            $response = $this->callMethod($name, $arguments);
+        }
+        catch(Exception $e)
+        {
+            $response = array('success'=>0);
+        }
+
+        return $response;
+    }
+
+    public function getProductDetailsForHumans($productId)
+    {
+        $productDetails = $this->getProductDetails(array('id' => $productId));
+        $productDetailsForHumans = array();
+
+        if(isset($productDetails['options']))
+        {
+            $productDetailsForHumans = array(
+                #'user_role' => $productDetails['options']['option1'],
+                'memory_limit' => $productDetails['options']['option3'],
+                'cpu_limit' => $productDetails['options']['option4'],
+                'cpu_shares' => $productDetails['options']['option5'],
+                'disk_size' => $productDetails['options']['option6'],
+                #'hypervisor' => $productDetails['options']['option7'],
+                #'primary_network' => $productDetails['options']['option8'],
+                'port_speed' => $productDetails['options']['option9'],
+                'ip_address_count' => $productDetails['options']['option13'],
+                'max_virtual_machines' => $productDetails['options']['option14'],
+                'backups_templates' => $productDetails['options']['option15'],
+                #'data_sent_hour' => $productDetails['options']['option16'],
+                #'data_received_hour' => $productDetails['options']['option18'],
+                'backup_space' => $productDetails['options']['option17'],
+                'bw_limit' => $productDetails['options']['option106'],
+            );
+        }
+
+        return $productDetailsForHumans;
+    }
+
+    public function accountHasCancelRequest($accountId)
+    {
+        $q = $this->db->prepare("SELECT * FROM hb_cancel_requests where account_id = ?");
+        $q->execute(array($accountId));
+        $cancel_requests = $q->fetch(PDO::FETCH_ASSOC);
+        $q->closeCursor();
+
+        return $cancel_requests;
+    }
+
+
+    public function getOrderByInvoiceId($invoiceId)
+    {
+        $q = $this->db->prepare("SELECT * FROM hb_orders where invoice_id = ?");
+        $q->execute(array($invoiceId));
+        $order = $q->fetch(PDO::FETCH_ASSOC);
+        $q->closeCursor();
+
+        return $this->getOrderDetails(array('id' => $order['id']));
+    }
+
+    public function getOnappUrl($serverDetails)
+    {
+        if($serverDetails['secure'] == 1)
+        {
+            return 'https://' . $serverDetails['ip'];
+        }
+        else
+        {
+            return 'http://' . $serverDetails['ip'];
+        }
+    }
+
+    public function getHalUrl($serverDetails)
+    {
+        #if($_SERVER['SERVER_NAME'] == 'toni.gigas.local') return 'http://10.0.0.10:' . ($serverDetails['id']==1?'8888':'8889');
+        return 'http://'. $serverDetails['ip'] . ':8888';
+    }
+
+    public function getServerDetails($serverId)
+    {
+        if(!is_array($serverId)) $serverId = array('id'=>$serverId);
+        $response = $this->api->getServerDetails($serverId);
+        $serverD = $response['server'];
+
+        $serverD['onapp_url'] = $this->getOnappUrl($serverD);
+        $serverD['hal_url']   = $this->getHalUrl($serverD);
+
+        return $serverD;
+    }
+
+    public function getFullNameProduct($prod_id)
+    {
+        $categories = $this->getOrderPages();
+        $product = $this->getProductDetails(array("id"=>$prod_id));
+
+        foreach($categories as $category)
+        {
+            if($category['id'] == $product['category_id'])
+            {
+                break;
+            }
+        }
+
+        if($product['name'] == 'Wordpress Cloud')
+        {
+            return $product['name'];
+        }
+
+        return $category['name'] . " - " . $product['name'];
+    }
+
+    public function getOrderPages($visible=null)
+    {
+        $q = $this->db->prepare("SELECT c.id, c.name, c.description, c.visible, c.sort_order, c.template, c.ctype, c.ptype AS ptype_id, " .
+                               "  pt.type AS ptype, LOWER(pt.type) AS lptype, CONCAT(c.ctype, '_', c.template) AS otype, IF(p.id IS NULL,0,COUNT(*)) AS products " .
+                               "FROM hb_categories c JOIN hb_product_types pt ON c.ptype=pt.id " .
+                               "  LEFT JOIN hb_products p ON c.id = p.category_id " .
+                               (!is_null($visible) ? (" WHERE visible = " . intval($visible)) : "") .
+                               " GROUP BY c.id");
+        $q->execute();
+        return $q->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    public function getProducts($array)
+    {
+        $q = $this->db->prepare("SELECT p.id, p.type, p.name, p.stock, c.paytype, p.description, " .
+                                "  c.m_setup, c.q_setup, c.s_setup, c.a_setup, c.b_setup, c.t_setup, c.d_setup, c.w_setup, c.h_setup, " .
+                                "  c.m, c.q, c.a, c.s, c.b, c.t, c.d, c.w, c.h, p.extra, p.qty, p.visible, IF(a.id IS NULL, 0, COUNT(*)) AS accounts " .
+                                "FROM hb_products p JOIN hb_common c ON c.rel='Product' AND c.id=p.id " .
+                                "  LEFT JOIN hb_accounts a ON a.product_id = p.id " .
+                                "WHERE p.category_id = ? GROUP BY p.id");
+        $q->execute(array($array['id']));
+        return $q->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    public function getCloudsByServerId($serverId=null)
+    {
+        $productList = array();
+
+        if(!empty($serverId))
+        {
+            $categories = $this->getOrderPages();
+
+            foreach($categories as $category)
+            {
+                if(! preg_match('/cloud/i', $category['name']) and ! preg_match('/balancer/i', $category['name']) and ! preg_match('/backup/i', $category['name']))
+                {
+                    continue;
+                }
+
+                $products = $this->getProducts(array('id' => $category['id']));
+
+                foreach($products as $product)
+                {
+                    $productDetails = $this->getProductDetails(array('id' => $product['id']));
+
+                    if(in_array($serverId, $productDetails['server']))
+                    {
+                        if($productDetails['name'] != 'Wordpress Cloud')
+                        {
+                            $productDetails['name'] = $category['name'] . " " . $productDetails['name'];
+                        }
+                        $productDetails['category'] = $category;
+
+                        unset($productDetails['category_id']);
+                        $productList[] = $productDetails;
+                    }
+                }
+            }
+        }
+
+        return $productList;
+    }
+
+    private function setTable($tableName, $id, $data, $id_field='id')
+    {
+        $columns = array_keys($data);
+        $q_set = implode(' = ?, ', $columns) . ' = ?';
+        $q = "UPDATE $tableName SET $q_set WHERE $id_field = ?";
+        $params = array_values($data);
+        $params[] = $id;
+
+        try
+        {
+            $q = $this->db->prepare($q);
+            $q->execute($params);
+            $q->closeCursor();
+        }
+        catch(Exception $e)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    public function setOrder($orderId, $data)
+    {
+        return $this->setTable('hb_orders', $orderId, $data);
+    }
+
+    public function setVpsDetails($accountId, $data)
+    {
+        return $this->setTable('hb_vps_details', $accountId, $data, 'account_id');
+    }
+
+    public function getOnAppTemplateId($hbTplId)
+    {
+        $q = $this->db->prepare("SELECT variable_id FROM hb_config_items WHERE id = ?");
+        $q->execute(array($hbTplId));
+        $d = $q->fetch(PDO::FETCH_ASSOC);
+        $q->closeCursor();
+
+        return $d['variable_id'];
+    }
+
+    public function getOnAppTemplateName($hbTplId)
+    {
+        $q = $this->db->prepare("SELECT name FROM hb_config_items WHERE id = ?");
+        $q->execute(array($hbTplId));
+        $d = $q->fetch(PDO::FETCH_ASSOC);
+        $q->closeCursor();
+
+        return $d['name'];
+    }
+
+    public function getModuleConfiguration($moduleId)
+    {
+        $q = $this->db->prepare('SELECT * FROM hb_modules_configuration WHERE id = ?');
+        $q->execute(array($moduleId));
+        $d = $q->fetch(PDO::FETCH_ASSOC);
+        $q->closeCursor();
+
+        return $d;
+    }
+
+    public function getServersDetails($group_id=null)
+    {
+        /*
+         * Devuelve las credenciales de acceso a onapp en el servidor indicado
+         */
+        $result = array();
+
+        if(!empty($group_id))
+        {
+            $q = $this->db->prepare("SELECT * FROM hb_servers WHERE group_id = :id");
+            $q->execute(array(':id'=>$group_id));
+            $ds = $q->fetchAll(PDO::FETCH_ASSOC);
+            $q->closeCursor();
+
+            foreach($ds as $d)
+            {
+                $result[$d['id']] = array(
+                    'hal_url' => $this->getHalUrl($d),
+                    'onapp_url' => $this->getOnappUrl($d),
+                    'username' => $d['username'],
+                    'password' => Utilities::decrypt($d['password']),
+                    'group_id' => $d['group_id'],
+                    'server_id' => $d['id'],
+                    'default' => ($d['default'] == 1),
+                );
+            }
+        }
+
+        return $result;
+    }
+
+    #
+    # ACCOUNTS
+    #
+    public function setAccount($accountId, $data)
+    {
+        return $this->setTable('hb_accounts', $accountId, $data);
+    }
+
+    public function getAccountByOrderId($orderId)
+    {
+        $q = $this->db->prepare("SELECT * FROM hb_accounts where order_id = ?");
+        $q->execute(array($orderId));
+        $account = $q->fetch(PDO::FETCH_ASSOC);
+        $q->closeCursor();
+
+        return $this->getAccountDetails(array('id' => $account['id']));
+    }
+
+    public function getLocationGroupId($accountDetails)
+    {
+        $groupId = null;
+        $custom = array();
+        $value = null;
+
+        if(is_array($accountDetails) and array_key_exists('custom', $accountDetails))
+        {
+            foreach($accountDetails['custom'] as $custom)
+            {
+                if($custom['key'] == 'location_group')
+                {
+                    list($value) = array_values($custom['values']);
+                    break;
+                }
+            }
+        }
+
+        if(array_key_exists('items', $custom))
+        {
+            foreach($custom['items'] as $item)
+            {
+                if($item['id'] == $value)
+                {
+                    return $item['variable_id'];
+                }
+            }
+        }
+
+        return $groupId;
+    }
+
+    public function getServerIds($groupId)
+    {
+        $q = $this->db->prepare("SELECT id FROM hb_servers WHERE group_id = ?");
+        $q->execute(array($groupId));
+        return $q->fetchAll(PDO::FETCH_COLUMN);
+    }
+
+    public function getAccountsDetails($clientId, $pType=null, $pSubtype='all', $serverId=null, $groupId=null, $status=null)
+    {
+        $accountsDetails = array();
+        $accounts = $this->getClientAccounts(array('id' => $clientId));
+        $servers = array();
+
+        if(!is_null($serverId))
+        {
+            $servers = array($serverId);
+            $s = $this->getServerDetails($serverId);
+            $groupId = $s['group_id'];
+        }
+        elseif(!is_null($groupId) and $pType == 'onappcloud')
+        {
+            $server = $this->getServerIds($groupId);
+        }
+
+        foreach($accounts as $account)
+        {
+            if(!empty($status) and $account['status'] != $status)
+            {
+                continue;
+            }
+
+            $accountDetails = $this->getAccountDetails(array('id' => $account['id']));
+
+            if($pType == 'onappcloud' and !empty($servers) and !in_array($accountDetails['server_id'], $servers))
+            {
+                continue;
+            }
+
+            if($pType == 'Other' and !is_null($groupId))
+            {
+                $locationGroupId = $this->getLocationGroupId($accountDetails);
+                if(
+                    (empty($locationGroupId) and $groupId != self::DEFAULT_GROUP_ID) or
+                    (!empty($locationGroupId) and $locationGroupId != $groupId)
+                )
+                {
+                    continue;
+                }
+            }
+
+            if($account['name'] == 'VLAN')
+            {
+                $q = $this->db->prepare('SELECT * FROM gigas_vlan WHERE account_id = ?');
+                $q->execute(array($account['id']));
+                $vlan = $q->fetch(PDO::FETCH_ASSOC);
+                if(!empty($vlan)) $accountDetails['vlan_range'] = $vlan['range'];
+            }
+
+            $accountDetails['server_details'] = (!empty($accountDetails['server_id'])) ? $this->getServerDetails($accountDetails['server_id']) : array();
+            $accountDetails['friendly_name'] = $account['name'];
+
+            # Guardamos solo si nos piden cloud de tipo dc
+            if(!empty($pType) and $accountDetails['ptype'] == $pType and $pSubtype == 'dc' and stripos($account['name'], 'giga') !== false)
+            {
+                $accountsDetails[$account['id']] = $accountDetails;
+            }
+            # o nos pide clouds de tipo vps
+            elseif(!empty($pType) and $accountDetails['ptype'] == $pType and $pSubtype == 'vps' and preg_match('/\.cloud$/', $accountDetails['domain']) !== false)
+            {
+                $accountsDetails[$account['id']] = $accountDetails;
+            }
+            # o nos pide vlans
+            elseif(!empty($pType) and $accountDetails['ptype'] == $pType and $pSubtype == 'vlan' and $account['name'] == 'VLAN')
+            {
+                $accountsDetails[$account['id']] = $accountDetails;
+            }
+            # o nos pide clouds de cualquier tipo
+            elseif(!empty($pType) and $accountDetails['ptype'] == $pType and $pSubtype == 'all')
+            {
+                $accountsDetails[$account['id']] = $accountDetails;
+            }
+            # o no nos pide clouds
+            elseif(empty($pType))
+            {
+                $accountsDetails[$account['id']] = $accountDetails;
+            }
+        }
+        return $accountsDetails;
+    }
+
+    public function getClientAccounts($client)
+    {
+        return $this->callMethod('getClientAccounts', array($client));
+    }
+
+    #
+    # ADDONS
+    #
+    public function getAddonsByModule($account_id, $module, $status=null)
+    {
+        $query = 'SELECT * FROM hb_accounts_addons aa LEFT JOIN hb_addons_modules m ON m.addon_id = aa.addon_id AND m.module = ? ' .
+            'WHERE aa.account_id = ? AND m.addon_id is NOT NULL';
+        $params = array($module, $account_id);
+
+        if(!empty($status))
+        {
+            $query .= ' AND aa.status = ?';
+            $params[] = $status;
+        }
+
+        $q = $this->db->prepare($query);
+        $q->execute($params);
+        $addons = $q->fetchAll(PDO::FETCH_ASSOC);
+        foreach($addons as $k => $addon)
+        {
+            $addon['options'] = unserialize($addon['options']);
+            $addons[$k] = $addon;
+        }
+        return $addons;
+    }
+
+    public function getAddonsSumByModule($account_id, $module, $option, $status)
+    {
+        $addons = $this->getAddonsByModule($account_id, $module, $status);
+        $sum = 0;
+        foreach($addons as $addon) { $sum += $addon['options'][$option]; }
+        return $sum;
+    }
+
+    public function getAddonsCount($account_id, $addon_id)
+    {
+        $q = $this->db->prepare('SELECT COUNT(*) AS num_addons FROM hb_accounts_addons WHERE account_id = ? AND addon_id = ? AND status="Active"');
+        $q->execute(array($account_id, $addon_id));
+        $r = $q->fetch(PDO::FETCH_ASSOC);
+        return $r['num_addons'];
+    }
+
+    public function getAddonsCountByName($account_id, $addon_name)
+    {
+        $q = $this->db->prepare('SELECT COUNT(*) AS num_addons FROM hb_accounts_addons WHERE account_id = ? AND name = ? AND status="Active"');
+        $q->execute(array($account_id, $addon_name));
+        $r = $q->fetch(PDO::FETCH_ASSOC);
+        return $r['num_addons'];
+    }
+
+    public function getAddonsByName($account_id, $addon_name)
+    {
+        $q = $this->db->prepare('SELECT * FROM hb_accounts_addons aa LEFT JOIN hb_addons_modules m ON m.addon_id = aa.addon_id ' .
+            'WHERE account_id = ? AND name LIKE ? AND status="Active"');
+        $q->execute(array($account_id, $addon_name));
+        $addons = $q->fetchAll(PDO::FETCH_ASSOC);
+        foreach($addons as $k => $addon)
+        {
+            $addon['options'] = unserialize($addon['options']);
+            $addons[$k] = $addon;
+        }
+        return $addons;
+    }
+
+    public function getAccountAddon($id)
+    {
+        $query = $this->db->prepare('SELECT * FROM hb_accounts_addons aa LEFT JOIN hb_addons_modules m ON m.addon_id = aa.addon_id WHERE id = ?');
+        $query->execute(array($id));
+        $addon_account = $query->fetch(PDO::FETCH_ASSOC);
+        return $addon_account;
+    }
+
+    public function getProductProps($productId, $serverId=1)
+    {
+        $q = $this->db->prepare('SELECT * FROM gigas_provisioning WHERE product_id = ? AND server_id = ?');
+        $q->execute(array($productId, $serverId));
+        $productProps = $q->fetch(PDO::FETCH_ASSOC);
+        $q->closeCursor();
+
+        return $productProps;
+    }
+
+    public function getAllAddons($prod_id=null, $addons=array(), $only_available=False)
+    {
+        $sql = "SELECT a.id, a.name, a.products, a.unique, c.*, amod.module, a.visible, a.system " .
+            " FROM hb_addons a " . 
+            "  JOIN hb_common c ON (a.id=c.id AND c.rel='Addon') " .
+            "  JOIN hb_addons_modules amod ON (amod.addon_id = a.id) " .
+            #(is_null($prod_id) ? " WHERE products != '' AND products IS NOT NULL" : " WHERE FIND_IN_SET(?, products) <> 0") . 
+            (is_null($prod_id) ? " WHERE 1" : " WHERE FIND_IN_SET(?, products) <> 0") . 
+            ($only_available ? " AND a.visible = '1'" : "");
+
+        $q = $this->db->prepare($sql);
+
+        if(is_null($prod_id))
+        {
+            $q->execute();
+        }
+        else
+        {
+            $q->execute(array($prod_id));
+        }
+        $d = $q->fetchAll( PDO::FETCH_ASSOC );
+        $q->closeCursor( );
+
+        $checkUnique = array();
+        foreach($addons as $adx)
+        {
+            $checkUnique[] = $adx['addon_id'];
+        }
+
+        if($d)
+        {
+            foreach($d as $k => $b)
+            {
+                if($b['unique'] == "1" and in_array($b['id'], $checkUnique))
+                {
+                    unset($d[$k]);
+                    continue;
+                }
+
+                $b['paytype'] = strtolower( $b['paytype'] );
+
+                if($b['paytype'] == "regular")
+                {
+                    foreach(array("d", "w", "m", "q", "s", "a", "b", "t") as $period)
+                    {
+                        if($b[$period] + $b[$period."_setup"] <= 0)
+                        {
+                            continue;
+                        }
+                        $d[$k]['paytype'] = $period;
+                        break;
+                        break;
+                    }
+                    if(strtolower($d[$k]['paytype']) == "regular")
+                    {
+                        $d[$k]['paytype'] = "m";
+                    }
+                }
+                else
+                {
+                    $d[$k]['paytype'] = $b['paytype'];
+                }
+            }
+        }
+
+        return $d;
+    }
+
+    public function getServiceAddons($id)
+    {
+        $q = $this->db->prepare(
+            "SELECT ad.*, COALESCE(m.module,'') as module, COALESCE(m.parentmod, '') as parentmod" .
+            " FROM hb_accounts_addons ad " .
+            "  LEFT JOIN hb_addons_modules m ON (m.addon_id = ad.addon_id)" .
+            " WHERE ad.account_id = ?");
+
+        $q->execute(array($id));
+        $b = $q->fetchAll(PDO::FETCH_ASSOC);
+        $q->closeCursor();
+
+        if($b)
+        {
+            foreach($b as $d)
+            {
+                $d['templated'] = $d['methods'] = array( );
+                if($d['module'] != "" && $d['parentmod'] != "" && $d['status'] == "Active")
+                {
+                    $m = ModuleFactory::singleton()->loadAddonModuleByFName($d['parentmod'], $d['module']);
+                    if(!is_null($m))
+                    {
+                        $f = $m->getClientFunctions();
+                        $t = array_intersect($m->getTemplated(), $f);
+                        $f = array_diff($f, $t);
+                        $d['methods'] = array_combine($f, $f);
+                        $d['templated'] = array_combine($t, $t);
+                        $d['info'] = $m->getClientInformation();
+                    }
+                }
+            }
+        }
+
+        return $b;
+    }
+
+    public function getGigasHostingModules()
+    {
+        $modules = array();
+        $gestor = opendir(dirname(__FILE__) . '/../../../Hosting/gigashosting');
+        while($module = readdir($gestor))
+        {
+            if(strpos($module, 'class.gigashosting_') !== false)
+            {
+                $modules[] = $module;
+            }
+        }
+        return $modules;
+    }
+
+    public function getOnappModules()
+    {
+        $modules = array();
+        $gestor = opendir(dirname(__FILE__) . '/../../../Hosting/onapp');
+        while($module = readdir($gestor))
+        {
+            if(strpos($module, 'class.onapp_') !== false)
+            {
+                $modules[] = $module;
+            }
+        }
+        return $modules;
+    }
+
+    public function getOnappAddons($prod_id, $acc_id)
+    {
+        $return = array("ip" => array("available" => 0, "service" => 0, "active" => 0));
+
+        $addons = $this->getAllAddons($prod_id);
+        $addx = $this->getServiceAddons($acc_id);
+        $service_add = array();
+
+        if(!empty($addx))
+        {
+            foreach($addx as $add)
+            {
+                $service_add[$add['addon_id']] = $add['status'] == "Active" ? 1 : 0;
+            }
+        }
+
+        $modules = $this->getOnappModules();
+    
+        if(!empty($addons))
+        {
+            foreach($addons as $add)
+            {
+                if($add['module'] != "" and in_array($add['module'], $modules))
+                {
+                    $idx = preg_replace('/^class.onapp_(.*).php$/', '\1', $add['module']);
+                    if($idx == 'diskspace') $idx = 'disk';
+                    if($idx == 'diskspace_v2') $idx = 'disk_v2';
+                    $return[$idx]['available'] = $add['visible'] == '1';
+                    $return[$idx]['system'] = $add['system'] == '1';
+                    if(isset($service_add[$add['id']]))
+                    {
+                        $return[$idx]['service'] = 1;
+                        if($service_add[$add['id']] == 1)
+                        {
+                            $return[$idx]['active'] = 1;
+                        }
+                    }
+                    $return[$idx]['id'] = $add['id'];           
+                    $return[$idx]['paytype'] = $add['paytype']; 
+                }
+            }
+        }
+
+        return $return;
+    }
+
+    public function getForm($accountId=null, $field_name=null)
+    {
+        $sql  = "SELECT variable, variable_id, ci.name FROM hb_config2accounts c2a ";
+        $sql .= " JOIN hb_config_items ci ON ci.id = c2a.config_id ";
+        $sql .= " JOIN hb_config_items_cat cic ON cic.id = ci.category_id";
+        if(!empty($accountId)) $sql .= " WHERE c2a.account_id = $accountId";
+
+        $q = $this->db->prepare($sql);
+        $q->execute();
+        $form = $q->fetchAll(PDO::FETCH_ASSOC);
+        $q->closeCursor();
+
+        $out = array();
+
+        foreach($form as $field)
+        {
+            $out[$field['variable']] = array('id'=>$field['variable_id'], 'label'=>$field['name']);
+        }
+
+        if(!empty($field_name))
+        {
+           return isset($out[$field_name]) ? $out[$field_name] : array();
+        }
+
+        return $out;
+    }
+
+    public function getProductsByCategoryId($categoryId, $visible=1)
+    {
+        $sql = "SELECT * FROM hb_products WHERE category_id = ? AND visible = ?";
+        $q = $this->db->prepare($sql);
+        $q->execute(array($categoryId, $visible));
+        $products = $q->fetchAll(PDO::FETCH_ASSOC);
+        $q->closeCursor();
+
+        return $products;
+    }
+
+    public function getApps($clientId=null)
+    {
+        $sql = "SELECT DISTINCT sg.* FROM hb_accounts a " .
+               " JOIN hb_servers s ON s.id = a.server_id " .
+               " JOIN hb_server_groups sg ON sg.id = s.group_id " .
+               "WHERE a.status='Active'";
+        if(!empty($clientId)) $sql .= " AND a.client_id = $clientId";
+
+        $q = $this->db->prepare($sql);
+        $q->execute();
+        $apps = $q->fetchAll(PDO::FETCH_ASSOC);
+        $q->closeCursor();
+
+        return $apps;
+    }
+
+    public function getApp($appId)
+    {
+        $sql = "SELECT * FROM hb_server_groups WHERE id = ?";
+
+        $q = $this->db->prepare($sql);
+        $q->execute(array($appId));
+        $app = $q->fetch(PDO::FETCH_ASSOC);
+        $q->closeCursor();
+
+        return $app;
+
+    }
+
+    public function getUsedServers($clientId=null)
+    {
+        $sql = "SELECT DISTINCT s.id, s.name, s.group_id FROM hb_accounts a " .
+               " JOIN hb_servers s ON s.id = a.server_id " .
+               " JOIN gigas_vlan gv ON gv.group_id = s.group_id " .
+               "WHERE a.status='Active'";
+        if(!empty($clientId)) $sql .= " AND a.client_id = $clientId";
+
+        $q = $this->db->prepare($sql);
+        $q->execute();
+        $servers = $q->fetchAll(PDO::FETCH_ASSOC);
+        $q->closeCursor();
+
+        return $servers;
+    }
+
+    public function verifyApiLogin($email, $password)
+    {
+        $q = $this->db->prepare("SELECT 1 AS success, id AS client_id FROM hb_client_access WHERE email = ? AND password = ?");
+        $q->execute(array($email, $password));
+        $d = $q->fetch(PDO::FETCH_ASSOC);
+        $q->closeCursor();
+
+        return $d;
+    }
+
+    public function domainSynch($params)
+    {
+        $domain_id = $params['id'];
+        $gigasapiextras = ModuleFactory::getModule("Other", "class.gigasapiextras.php");
+        $synchronized = intval($gigasapiextras->domainSync($domain_id));
+        if(!$synchronized) return array();
+        return array("success" => $synchronized, "call" => "domainSynch", "server_time" => time(), "info" => ($synchronized?array("Domain with ID #" . $domain_id . " synchronized."):""));
+    }
+
+    public function domainTransfer($params)
+    {
+        $domain_id = $params['id'];
+        $gigasreseller = ModuleFactory::getModule("Domain", "class.gigasreseller.php");
+        $gigasreseller->getFromDB($domain_id);
+        $transferred = intval($gigasreseller->Transfer());
+        if(!$transferred) return array();
+        return array("success" => $transferred, "call" => "domainTransfer", "server_time" => time(), "info" => ($transferred?array("Domain with ID #" . $domain_id . " transferred."):""));
+    }
+
+    public function getClientBillingExtra($client_id)
+    {
+        $sql = "SELECT * FROM gigas_client_billing_extra WHERE client_id = ?";
+        $q = $this->db->prepare($sql);
+        $q->execute(array($client_id));
+        $extra_details = $q->fetch(PDO::FETCH_ASSOC);
+        $q->closeCursor();
+        return $extra_details;
+    }
+}

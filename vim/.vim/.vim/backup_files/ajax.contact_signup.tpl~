@@ -1,0 +1,432 @@
+{if $extrafields}
+  {php}
+  $efields = $this->get_template_vars('extrafields');
+  $tabix = ((sizeof($efields)+1)/2)+7;
+  $this->assign('tabix', $tabix);
+  {/php}
+{else}
+  {php}
+  $tabix = 7;
+  $this->assign('tabix', $tabix); {/php}
+{/if}
+
+<script>
+ {literal}
+ $("#cif-input, #nif-input").change(function(){
+   $(this).val($(this).val().replace(/(-|\.|_| |\*)/g, "").toUpperCase());
+ });
+ $("#phonenumber-input, #postcode-input").change(function(){
+   $(this).val($(this).val().replace(/(-|\.|_| |\*)/g, ""));
+ });
+
+$(function(){
+ //Put it in a loop
+ $('#password-input').qtip({
+   content: {
+     text:'{/literal}{$lang.pass_tip}{literal}'
+   },
+   position: {
+     my: 'top center', // Use the corner...
+     at: 'bottom center' // ...and opposite corner
+   },
+   show: {
+     event: 'focus',
+     solo: true
+   },
+   hide:
+                           {
+     event: 'unfocus',
+     inactive: 3000
+   },
+   style: {
+     classes: 'ui-tooltip-shadow ui-tooltip-dark'
+   }
+ });
+ $('#account-type').qtip({
+   content: {
+     text:'{/literal}{$lang.account_tip}{literal}'
+   },
+   position: {
+     my: 'bottom center', // Use the corner...
+     at: 'top center' // ...and opposite corner
+   },
+   show: {
+     event: 'focus',
+     solo: true
+   },
+   hide:
+                         {
+     event: 'unfocus',
+     inactive: 3000
+   },
+   style: {
+     classes: 'ui-tooltip-shadow ui-tooltip-dark'
+   }
+ });
+ $('#address-input').qtip({
+   content: {
+     text: '{/literal}{$lang.address_tip}{literal}'
+   },
+   position: {
+     my: 'top center', // Use the corner...
+     at: 'bottom center' // ...and opposite corner
+   },
+   show: {
+     event: 'focus',
+     solo: true
+   },
+   hide:
+                          {
+     event: 'unfocus',
+     inactive: 3000
+   },
+   style: {
+     classes: 'ui-tooltip-shadow ui-tooltip-dark'
+   }
+ });
+ $('#password2-input').qtip({
+   content: {
+     text: '{/literal}{$lang.pass2_tip}{literal}'
+   },
+   position: {
+     my: 'top center', // Use the corner...
+     at: 'bottom center' // ...and opposite corner
+   },
+   show: {
+     event: 'focus',
+     solo: true
+   },
+   hide:
+                            {
+     event: 'unfocus',
+     inactive: 3000
+   },
+   style: {
+     classes: 'ui-tooltip-shadow ui-tooltip-dark'
+   }
+
+ });
+ $('#twitter-input').qtip({
+   content: {
+     text: '{/literal}{$lang.twitter_tip}{literal}'
+   },
+   position: {
+     my: 'top center', // Use the corner...
+     at: 'bottom center' // ...and opposite corner
+   },
+   show: {
+     event: 'focus',
+     solo: true
+   },
+   hide:
+                          {
+     event: 'unfocus',
+     inactive: 3000
+   },
+   style: {
+     classes: 'ui-tooltip-shadow ui-tooltip-dark'
+   }
+ });
+ $('#cif-input').qtip({
+   content:{
+     text: '{/literal}{$lang.cif_tip}{literal}'
+   },
+   position: {
+     my: 'top center', // Use the corner...
+     at: 'bottom center' // ...and opposite corner
+   },
+   show: {
+     event: 'focus',
+     solo: true
+   },
+   hide:
+                      {
+     event: 'unfocus',
+     inactive: 3000
+   },
+   style: {
+     classes: 'ui-tooltip-shadow ui-tooltip-dark'
+   }
+ });
+ $('#nif-input').qtip({
+   content: {
+     text:'{/literal}{$lang.nif_tip}{literal}'
+   },
+   position: {
+     my: 'top center', // Use the corner...
+     at: 'bottom center' // ...and opposite corner
+   },
+   show: {
+     event: 'focus',
+     solo: true
+   },
+   hide:
+                      {
+     event: 'unfocus',
+     inactive: 3000
+   },
+   style: {
+     classes: 'ui-tooltip-shadow ui-tooltip-dark'
+   }
+
+ });
+ $('#my-company-input').qtip({
+   content: {
+     text: '{/literal}{$lang.company_tip}{literal}'
+   },
+   position: {
+     my: 'top center', // Use the corner...
+     at: 'bottom center' // ...and opposite corner
+   },
+   show: {
+     event: 'focus',
+     solo: true
+   },
+   hide:
+                             {
+     event: 'unfocus',
+     inactive: 3000
+   },
+   style: {
+     classes: 'ui-tooltip-shadow ui-tooltip-dark'
+   }
+ });
+ $('#city-label').qtip({
+   content: {
+     text: 'Alguno de los caracteres no son validos'
+   },
+   position: {
+     my: 'top center', // Use the corner...
+     at: 'bottom center' // ...and opposite corner
+   },
+   show: false,
+   hide: false,
+   style: {
+     classes: 'ui-tooltip-shadow ui-tooltip-dark'
+   }
+ });
+ $('#lastname-label').qtip({
+   content: {
+     text: 'Alguno de los caracteres no son validos'
+   },
+   position: {
+     my: 'top center', // Use the corner...
+     at: 'bottom center' // ...and opposite corner
+   },
+   show: false,
+   hide: false,
+   style: {
+     classes: 'ui-tooltip-shadow ui-tooltip-dark'
+   }
+ });
+ $('#name-label').qtip({
+   content: {
+     text: 'Alguno de los caracteres no son validos'
+   },
+   position: {
+     my: 'top center', // Use the corner...
+     at: 'bottom center' // ...and opposite corner
+   },
+   show: false,
+   hide: false,
+   style: {
+     classes: 'ui-tooltip-shadow ui-tooltip-dark'
+   }
+ });
+ $('#address-label').qtip({
+   content: {
+     text: 'Alguno de los caracteres no son validos'
+   },
+   position: {
+     my: 'top center', // Use the corner...
+     at: 'bottom center' // ...and opposite corner
+   },
+   show: false,
+   hide: false,
+   style: {
+     classes: 'ui-tooltip-shadow ui-tooltip-dark'
+   }
+ });
+});
+ {/literal}
+</script>
+<style>
+ {literal}
+ .ui-autocomplete { background-color: white; }
+ {/literal}
+</style>
+<script>
+ {literal}
+ $(function() {
+   if (navigator.appName.indexOf("Microsoft") == -1)
+   {
+     function log( message ) {
+       $( "<div/>" ).text( message ).prependTo( "#log" );
+       $( "#log" ).scrollTop( 0 );
+     }
+
+     $( "input[name=city]" ).autocomplete({
+       source: function( request, response ) {
+         $.ajax({
+           url: "http://ws.geonames.org/searchJSON?country=" + $('select[name=country]').val(),
+           dataType: "jsonp",
+           data: {
+             featureClass: "P",
+             style: "full",
+             maxRows: 12,
+             name_startsWith: request.term
+           },
+           success: function( data ) {
+             response( $.map( data.geonames, function( item ) {
+               return {
+                 label: item.name + (item.adminName1 ? ", " + item.adminName1 : "") + ", " + item.countryName,
+                 value: item.name
+               }
+             }));
+           }
+         });
+       },
+       minLength: 2,
+       select: function( event, ui ) {
+         log( ui.item ?
+              "Selected: " + ui.item.label :
+              "Nothing selected, input was " + this.value);
+       },
+       open: function() {
+         $( this ).removeClass( "ui-corner-all" ).addClass( "ui-corner-top" );
+       },
+       close: function() {
+         $( this ).removeClass( "ui-corner-top" ).addClass( "ui-corner-all" );
+       }
+     });
+   }
+ });
+ {/literal}
+</script>
+{php}
+    $action = $this->get_template_vars()['action'];
+    $this->assign('action', $action);
+{/php}
+
+<div class="tab-roles">
+  {if $action == 'add'}
+  {assign var=required value='required'}
+  {assign var=asterisk value='<span class="req">*</span></label>'}
+  {/if}
+
+  <label id="name-label">
+    {$lang.firstname}{$asterisk}
+  </label>
+  <input type="text" value="{$submit.firstname}" name="firstname" id="name-input" {$required}/>
+
+  <label id="lastname-label">{$lang.lastname}{$asterisk}
+  <input type="text" value="{$submit.lastname}" name="lastname" id="lastname-input" {$required}/>
+</div>
+<div class="tab-roles" style="margin-top:-4px;">
+  <label>{$lang.email}<span class="req">*</span></label>
+  <input type="text" value="{$submit.email}" name="email" required />
+    
+  <label>{$lang.password}{$asterisk}</label>
+  <input type="password" name="password"  id="password-input" {$required}/>
+
+  <label>{$lang.confirmpassword}{$asterisk}</label>
+  <input type="password" name="password2" id="password2-input" {$required}/>
+</div>
+<div class="tab-roles" style="margin-top:-4px;display:none;">
+
+  <label class="cmb-180">{$lang.clacctype}</label>
+
+  <select  class="combo-300" name="type" id="account-type" >
+    <option value="Private" {if $submit.type=='Private' || $clientdata.type=="Private"}selected="selected"{/if}>{$lang.Private}</option>
+    <option value="Company" {if $submit.type=='Company' || $clientdata.type=="Company"}selected="selected"{/if}>{$lang.Company}</option>
+  </select>
+
+  <label>{$lang.phone}<span class="req">*</span></label>
+  <input type="text" value="{if (!empty($submit.phonenumber))}{$submit.phonenumber}{else}{$clientdata.phonenumber}{/if}" name="phonenumber" id="phonenumber-input" />
+
+  <label class="cmb-180">{$lang.country}<span class="req">*</span></label>
+
+  <select class="combo-300" name="country">
+    {foreach from=$countries key=k item=v}
+      <option value="{$k}"
+              {if $k==$submit.country  || ($k==$clientdata.country) || (!$submit.country && $k==$defaultCountry)} selected="Selected"{/if}>{if $v!="Spain"}{$v}{else}{$lang.Spain}{/if}
+      </option>
+    {/foreach}
+  </select>
+
+  <label id="city-label">{$lang.city}<span class="req">*</span></label>
+  <input type="text" value="{if (!empty($submit.city))}{$submit.city}{else}{$clientdata.city}{/if}" name="city" id="city-input" />
+
+  <label>{$lang.state}<span class="req">*</span></label>
+  <input type="text" value="{if (!empty($submit.state))}{$submit.state}{else}{$clientdata.state}{/if}" name="state" id="state_input" />
+
+
+
+
+  <label id="address-label">{$lang.address}<span class="req">*</span></label>
+  <input type="text" value="{if (!empty($submit.address1))}{$submit.address1}{else}{$clientdata.address1}{/if}" name="address1" id="address-input"/>
+
+
+  <label id="postcode-label">{$lang.postcode}<span class="req">*</span></label>
+  <input type="text" value="{if (!empty($submit.postcode))}{$submit.postcode}{else}{$clientdata.postcode}{/if}" name="postcode" id="postcode-input" />
+
+
+
+
+</div>
+
+
+
+{if $extrafields}
+  {php}
+  //sacado de http://stackoverflow.com/questions/2699086/php-sort-multidimensional-array-by-value
+  function aasort (&$array, $key)
+  {
+  $sorter=array();
+  $ret=array();
+  reset($array);
+  foreach ($array as $ii => $va) {
+  $sorter[$ii]=$va[$key];
+  }
+  asort($sorter);
+  foreach ($sorter as $ii => $va) {
+  $ret[$ii]=$array[$ii];
+  }
+  $array=$ret;
+  }
+  $fields = $this->get_template_vars('extrafields');
+  aasort($fields, 'sort_order');
+  $this->assign($fields, 'extrafields');
+
+  {/php}
+  {foreach from=$extrafields item=field name=f key=k}
+    {if $field.code == 'nif' || $field.code == 'cif'}
+      {if $field.code == 'nif'}
+    	<label>{$lang.form_dni_field}<span class="req">{if $field.required=='1'}*{/if}</span></label>
+      {else}
+    	<label>{$lang.form_cif_field}<span class="req">{if $field.required=='1'}*{/if}</span></label>
+      {/if}
+    {else}
+      {if $field.code == 'my-company'}
+        <label>{$lang.company}<span class="req">{if $field.required=='1'}*{/if}</span></label>
+      {else}
+        <label>{$field.name}<span class="req">{if $field.required=='1'}*{/if}</span></label>
+      {/if}
+    {/if}
+    {if $field.field_type=='Input'}
+      <input  value="{$submit[$field.code]}" name="{$field.code}" type="text" id="{$field.code}-input" />
+            {elseif $field.field_type=='Check'}
+      {foreach from=$field.default_value item=fa}
+        <input type="checkbox" name="{$field.code}[{$fa}]" value="1" />{$fa}<br/>
+      {/foreach}
+    {else}
+      <select name="{$field.code}">
+	{foreach from=$field.default_value item=fa}
+	  <option {if $submit[$field.code]==$fa}selected="selected"{/if}>{$fa}</option>
+	{/foreach}
+      </select>
+    {/if}
+  {/foreach}
+{/if}
+
+<!--<tr height="46" style="{if !$submit.type || $submit.type=='Private'}display:none{/if}" class="iscomp">-->

@@ -1,0 +1,556 @@
+<?php
+
+require_once "libs/onapp/BillingPlan.php";
+require_once "libs/hal/BillingPlan.php";
+require_once "libs/hal/Provisioning.php";
+require_once "libs/hal/Vm.php";
+require_once "libs/hal/Network.php";
+require_once "libs/Hostbill.php";
+require_once "libs/Utils.php";
+
+require_once "libs/hostbill/TransferControl.php";
+require_once(APPDIR_MODULES . 'Hosting/gigashosting/libs/class.base_resources.php');
+
+/*
+ esta clase gestiona la parte de un upgrade/downgrade que no hace hostbill
+ */
+class AccountHB
+{
+
+    public function __construct($details, $account_id, $api_connection)
+    {
+        $this->api = new HostbillApi();
+        $this->gapi = new GApiWrapper();
+        $this->id = $account_id;
+        $this->details = $details;
+        $this->db = Engine::singleton()->getObject("db");
+        $this->api_connection = $api_connection; //api de gigas
+    }
+
+    private function canChangeProduct($orig_details, $dest_details)
+    {
+        // calculo de limite de cores con los addons
+        $base_resource = new GIGAS_BaseResources($dest_details);
+        $limit_cores['total'] = $base_resource->getTotalCores($dest_details['product_resources']['cpu_limit']);
+        $limit_cores['intel'] = $base_resource->getTotalIntelCores();
+        $limit_cores['amd'] = $limit_cores['total'] - $limit_cores['intel'];
+
+        if ($limit_cores['intel'] < 0) {
+            $error = "Downgrade error. Not enough Intel cores";
+            Engine::singleton()->addError($error);
+            return $error;
+        }
+
+        if ($limit_cores['amd'] < 0) {
+            $error = "Downgrade error. Not enough AMD cores";
+            Engine::singleton()->addError($error);
+            return $error;
+        }
+
+        // calculo de cores usados por tipo
+        $api_user_id = $orig_details['details']['option102']['value'];
+        $api = new GigasApi($this->api_connection);
+        try {
+            $resp = $api->get("/api_user/{$api_user_id}/used_resources")->json();
+        } catch (Exception $e) {
+            hbm_log_error("Error en api $e. ".$e->getMessage());
+            return false;
+        }
+
+        $usage= array(
+            'intel' => 0,
+            'amd'   => 0,
+        );
+
+        foreach ($resp as $u) {
+            if ($u['resource_type'] == 'IntelCpu') {
+                $usage['intel'] = $u['use'];
+            } elseif ($u['resource_type'] == 'AmdCpu') {
+                $usage['amd'] = $u['use'];
+            }
+        }
+
+        // restriccion por usados
+        if ($usage['intel'] > $limit_cores['intel']) {
+            $error = "Downgrade error. Too many Intel cores used.";
+            Engine::singleton()->addError($error);
+            return $error;
+        }
+        if ($usage['amd'] > $limit_cores['amd']) {
+            $error = "Downgrade error. Too many AMD cores used. ";
+            Engine::singleton()->addError($error);
+            return $error;
+        }
+
+        $from = strpos($orig_details['options']['option10'], 'Multiple Machines') === false ? 'vps' : 'dc';
+        $to   = strpos($dest_details['option10']['value'], 'Multiple Machines') === false ? 'vps' : 'dc';
+        $error = '';
+
+        # Comprobamos que el bandwidth consumido no excede el máximo del nuevo plan
+        # - VPS : No puede tener más transferencia consumida que la que permite le nuevo plan
+        # - DC  : Lo mismo que VPS
+        //$transfer = $this->api->getBw($this->id);
+        $tcHB = new TransferControlHB();
+        $transfer = $tcHB->getTransfer($this->id);
+        $consumed_bw = floatval($transfer['bw']);
+        $addons_extra_bw = floatval($transfer['bw_addon']);
+        $new_plan_bw_limit = floatval($dest_details['option106']['value']);
+
+        if ($addons_extra_bw + $new_plan_bw_limit < $consumed_bw) {
+            Engine::singleton()->addError(
+                "New transfer limit has been exceeded|".
+                "Se ha sobrepasado el limite de transferencia mensual del nuevo producto"
+            );
+            $error .= 'Se ha sobrepasado el limite de transferencia mensual del nuevo producto. '.
+                "-- addons_extra_bw: " . $addons_extra_bw . " -- new_plan_bw_limit: ".
+                $new_plan_bw_limit . " -- consumed_bw: " . $consumed_bw;
+        }
+
+        return $error;
+    }
+
+    public function isUpgrade($orig_details)
+    {
+
+        $dest_details = $this->details;
+        $orig_memory_limit = $orig_details['options']['option3'];
+        $dest_memory_limit = $dest_details['option3']['value'];
+
+        return ($dest_memory_limit > $orig_memory_limit);
+    }
+
+    public function changeProduct($orig_details)
+    {
+        $dest_details = $this->details;
+
+        $assoc = array(
+            'option3'   => "memory_limit",
+            'option4'   => "cpu_limit",
+            'option5'   => "cpu_shares",
+            'option6'   => "disk_size",
+            'option9'   => "port_speed",
+            'option13'  => "ip_address_count",
+            'option14'  => "max_virtual_machines",
+            'option15'  => "backups_templates",
+            'option17'  => "backup_space",
+            'option106' => "bw_limit"
+        );
+
+        // Añadimos a los detalles del account, las caraterísticas del producto y recursos usados
+        $orig_details['product_resources'] = array();
+        foreach ($assoc as $k => $v) {
+            $orig_details['product_resources'][$v] = $orig_details['options'][$k];
+        }
+        $orig_details['vms_resources'] = $this->getVmsResources();
+
+        $dest_details['product_resources'] = array();
+        foreach ($assoc as $k => $v) {
+            $dest_details['product_resources'][$v] = $dest_details[$k]['value'];
+        }
+
+        # Averiguamos de donde a donde vamos
+        $from = strpos($orig_details['options']['option10'], 'Multiple Machines') === false ? 'vps' : 'dc';
+        $to   = strpos($dest_details['option10']['value'], 'Multiple Machines') === false ? 'vps' : 'dc';
+
+        #
+        # 1) En los upgrade dentro de la misma categoría no hace falta comprobar recursos usados
+        #
+        $is_upgrade = ($dest_details['product_resources']['memory_limit']
+                       > $orig_details['product_resources']['memory_limit']);
+        # 1.1. Upgrade desde DC a DC: Solo cambiamos el billing plan (lo hace hostbill)
+        if ($is_upgrade and $from == 'dc' and $to == 'dc') {
+            $new_resources = array();
+        } elseif ($is_upgrade and $from == 'vps' and $to == 'vps') {
+        # 1.2. Upgrade desde VPS a VPS: Cambios el billing plan (lo hace hostbill) y recursos usados
+            $this->resizeVps($orig_details, $dest_details);
+        } else {
+        #
+        # 2) Para el resto de operaciones sí hay que comprobar recursos usados
+        #
+            $error_message = $this->canChangeProduct($orig_details, $dest_details);
+            $can_change_product = empty($error_message);
+
+            # 2.1. No se cumplen los requisitos del cambio de producto: Volvemos al producto anterior
+            if (!$can_change_product) {
+                return false;
+            } else {
+            # 2.2.
+                # 2.2.1. Downgrade desde VPS ó DC a VPS: Cambiamos billing plan (lo hace hostbill) y recursos
+                if ($to == 'vps') {
+                    $this->resizeVps($orig_details, $dest_details);
+                } elseif ($from == 'vps' and $to == 'dc') {
+                # 2.2.2. "Upgrade" desde VPS a DC: Cambiamos billing plan (lo hace hostbill) y recursos usados
+                    $this->resizeVps($orig_details, $dest_details);
+                } else {
+                # 2.2.3. Downgrade desde DC a DC: Solo cambiamos billing plan (lo hace hostbill)
+                    $new_resources = array();
+                }
+            }
+        }
+
+        // Update backup types, if needed
+        $this->changeBackupType($orig_details, $dest_details);
+
+        //
+        // Actualizamos el hb_vps_details
+        //
+        $this->updateVpsDetails($orig_details);
+
+        //
+        // Actualizamos el limite de ancho de banda para que ajuste apropiadamente al nuevo producto
+        //
+        //$this->api->updateAccountBwLimit($orig_details['id']);
+        $tcHB = new TransferControlHB();
+        $tcHB->updateAccountBwLimit($orig_details['id'], $dest_details['product_resources']['bw_limit']);
+
+        //
+        // Cambiamos el rate limit del billing plan y de las máquinas
+        //
+        $this->changePackagePortSpeed();
+
+        //
+        // Le quitamos el crédito que Hostbill "the generous" le ha dado al cliente
+        //
+        $account_id = $orig_details['id'];
+        $client_id  = $orig_details['client_id'];
+        $upgrade_id = $this->removeCredit($account_id, $client_id);
+
+        //
+        // actualizamos el guaranteed_ram de la tabla hb_vps_details si es vps
+        //
+        if ($dest_details['option10']['value'] == 'Single Machine, autocreation') {
+            $query = $this->db->prepare("update hb_vps_details set guaranteed_ram=? where account_id=?");
+//            $account_details = $this->getAccountDetails();
+            $ram = $dest_details['options'];
+            $query->execute(array($ram, $account_id));
+            $query->closeCursor();
+        }
+
+        return true;
+    }
+
+    private function changePackagePortSpeed()
+    {
+        die();
+        $dest_details   = $this->details;
+
+        $new_port_speed = $dest_details['option9']['value'];
+        $api_user_id    = $dest_details['extra_details']['option102'];
+
+        //cambiar el ratelimit del billing plan
+        $api = new GigasApi($this->api_connection);
+
+        try {
+            $network_groups = $api->put(
+                "/api_user/{$api_user_id}/base_resource/network_group/".$dest_details['option102']['value'],
+                array("limit_rate"=>$new_port_speed)
+            )->json();
+        } catch (Exception $e) {
+            hbm_log_error("Error on upgrade. Cannot change rate_limit in billing plan. ".$e->getMessage());
+            return false;
+        }
+
+        //cambiar el ratelimit de las maquinas del account
+        try {
+            $api_user = $api->get("/api_user/{$api_user_id}", array())->json();
+            $v_machines = $api->get("/virtual_machines?cloud_id=".$api_user['cloud_id'], array())->json();
+        } catch (Exception $e) {
+            Engine::singleton()->addError("Error on upgrade looking for an api user");
+            return false;
+        }
+
+
+        foreach ($v_machines as $v_machine) {
+            try {
+                $api->put("/virtual_machine/".$v_machine['id'], array('rate_limit'=>$new_port_speed))->json();
+            } catch (Exception $e) {
+                Engine::singleton()->addError("Error on upgrade changing rate_limit for machine ".$v_machine['id']);
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    public function removeCredit($account_id, $client_id)
+    {
+        $q = $this->db->prepare(
+            'SELECT * FROM hb_upgrades WHERE account_id = ? AND client_id = ? ' .
+            'AND status = "Pending" ORDER BY id DESC LIMIT 1'
+        );
+        $q->execute(array($account_id, $client_id));
+
+        $upgrade = $q->fetch(PDO::FETCH_ASSOC);
+
+        if (!empty($upgrade)) {
+            $total_a_descontar = $upgrade['total'];
+
+            if ($total_a_descontar < 0) {
+                $q = $this->db->prepare('UPDATE hb_client_billing SET credit = credit - ? WHERE id = ?');
+                $q->execute(array(abs($total_a_descontar), $client_id));
+            }
+
+            $q = $this->db->prepare('UPDATE hb_upgrades SET status="Upgraded" WHERE id = ?');
+            $q->execute(array($upgrade['id']));
+
+            $q = $this->db->prepare('UPDATE hb_orders SET status="Active" WHERE id = ?');
+            $q->execute(array($upgrade['order_id']));
+        }
+    }
+
+    private function getVmsResources()
+    {
+        $halVm = new VmHal($this->id);
+        $vms = $halVm->getVms();
+
+        $data = array (
+            'memory' => 0,
+            'cpus' => 0,
+            'disk_size' => 0,
+            'num_vms' => count($vms),
+            'num_ips' => 0,
+            'num_priv_ips' => 0,
+        );
+
+        foreach ($vms as $vmid => $vm) {
+            $data['memory'] += intval($vm['memory']);
+            $data['cpus'] += intval($vm['cpus']);
+            $disks = $halVm->getDisksSize($vmid);
+            $data['disk_size'] += intval($disks['total']);
+            $data['swap_disk_size'] = $disks['swap_disk_size'];
+            $data['num_disks'] = count($disks['secondary_disk_size']) + 1;
+            $data['vmid'] = $vmid;
+        }
+
+        $halNet = new NetworkHal($this->id);
+        $vms_ips = $halNet->getVmsIPList($vms, $list_type = 1, $clean = true);
+
+        foreach ($vms_ips as $vmid => $ips) {
+            $data['num_ips'] += count($ips);
+        }
+
+        $vms_priv_ips = $halNet->getVmsIPList($vms, $list_type = 2, $clean = true);
+
+        foreach ($vms_priv_ips as $vmid => $ips) {
+            $data['num_priv_ips'] += count($ips);
+        }
+
+        return $data;
+    }
+
+    private function resizeVps($orig_details, $dest_details)
+    {
+        $new_resources = array();
+        $done = true;
+
+        $from = strpos($orig_details['options']['option10'], 'Multiple Machines') === false ? 'vps' : 'dc';
+        $to   = strpos($dest_details['option10']['value'], 'Multiple Machines') === false ? 'vps' : 'dc';
+
+        $user_id = $orig_details['extra_details']['option6'];
+
+        $from_memory = $orig_details['vms_resources']['memory'];
+        $to_memory = intval($dest_details['product_resources']['memory_limit']);
+
+        $from_cpus = $orig_details['vms_resources']['cpus'];
+        $to_cpus = intval($dest_details['product_resources']['cpu_limit']);
+
+        $from_disk = $orig_details['vms_resources']['disk_size'];
+        $swap_disk_size = $orig_details['vms_resources']['swap_disk_size'];
+        $to_disk = intval($dest_details['product_resources']['disk_size']);
+
+        # 1. Ajustar ram
+        if (
+            ($to == 'vps' and $from_memory != $to_memory)
+            or
+            ($to == 'dc' and $from_memory > $to_memory)
+        ) {
+            $new_resources['memory'] = $to_memory;
+        }
+
+        # 2. Ajustar cpu
+        if (
+            ($to == 'vps' and $from_cpus != $to_cpus)
+            or
+            ($to == 'dc' and $from_cpus > $to_cpus)
+        ) {
+            $new_resources['cpus'] = $to_cpus;
+        }
+
+        ## 3. Resize de disco hacia abajo si es necesario pero nunca hacia arriba
+        #if($to_disk < $from_disk)
+        #{
+        #    $new_resources['disk_space'] = $to_disk - $swap_disk_size;
+        #}
+
+        if (!empty($new_resources)) {
+            // 4. Si estamos bajando recursos creamos un billing_plan temporal para poder hacer el resize
+            if ($from_memory < $to_memory or $from_cpus < $to_cpus or $to_disk < $from_disk) {
+                #Engine::singleton()->addInfo('Creamos un bp temporal');
+                $onappBP = new BillingPlanOnApp($this->id);
+                $bps = $onappBP->createTemporary($user_id, $orig_details['product_resources']);
+            }
+
+            // 5. Resize
+            $halVm = new VmHal($this->id);
+            $done = $halVm->resize($orig_details['vms_resources']['vmid'], $new_resources);
+
+            // 6. Borramos el billing plan temporal
+            if (!empty($bps)) {
+                #Engine::singleton()->addInfo('Borramos el bp temporal');
+                $onappBP->deleteTemporary($user_id, $bps);
+            }
+        }
+
+        return $done;
+    }
+
+    private function updateVpsDetails($orig_details)
+    {
+        $dest_details = $this->details;
+
+        $wasvps = (strpos($orig_details['options']['option10'], 'Single Machine') !== false);
+        $isvps = (strpos($dest_details['option10']['value'], 'Single Machine') !== false);
+
+        // error_log("wasvps $wasvps, isvps $isvps");
+
+        if ($isvps != $wasvps) {
+            if ($isvps) {
+                //añadir vps a la tabla hb_vps_details al hacer un *grade dc->vps
+                $halVm = new VmHal($orig_details['id']);
+                $vmlis = $halVm->getVms();
+                if (!empty($vmlis)) {
+                    reset($vmlis);  // cogemos la primera key(no deberia haber mas))
+                    $vmid = key($vmlis);
+                    $vm = $vmlis[$vmid];
+                    //error_log("detalles de la vm: " . print_r($vm,true));
+                    $ram = $vm['memory'];
+                    $type="xen";
+                    $halNet = new NetworkHal($orig_details['id']);
+                    $iplist = $halNet->getIPList($vmid, $list_type = 1, $clean = true);
+                    // error_log("lista de ips" . print_r($iplist, true));
+                    $ip = '0';
+                    if (!empty($iplist[0])) {
+                        $ip = $iplist[0]['address'];
+                    }
+                    $os = $vm['template_id'];
+                    $hostname = $vm['hostname'];
+                    $extra = serialize(
+                        array(
+                            'onapplogin' => array(
+                                'type' => 'check',
+                                'value' => $dest_details['option5']['value']
+                            ),
+                            'onapploginenabled' => array(
+                                'type' => 'hidden',
+                                'value' => '1'
+                            )
+                        )
+                    );
+                    // error_log("Valores: vmid $vmid, type $type, ram $ram, os $os, extra $extra");
+                    $this->setIsVpsToYes($vmid, $type, $ip, $ram, $os, $extra, $hostname);
+                    // error_log("guardado");
+                } else {
+                    // error_log("no tenemos los datos");
+                    $this->setIsVpsToYesEmpty();
+                }
+            } else {
+                //eliminar vps de la tabla hb_vps_details al hacer un *grade vps->dc
+                // error_log("borramos vps");
+                $this->setIsVpsToNo();
+            }
+        }
+    }
+
+    private function setIsVpsToNo()
+    {
+        $counter = $this->db->query(
+            "SELECT count(*) AS num FROM hb_vps_details WHERE account_id = ".$this->id
+        )->fetch();
+
+        if ($counter['num'] > 0) {
+            $q = $this->db->prepare("DELETE FROM hb_vps_details WHERE account_id = ?");
+            $res = $q->execute(array($this->id));
+            //error_log("resultado $res");
+        }
+    }
+
+    private function setDomain($vpsname = "")
+    {
+        if ($vpsname != "") {
+             $vpscloud = $vpsname.".cloud";
+        } else {
+             $vpscloud = "vps" . GigasUtilities::generateRandomString(6).".cloud";
+        }
+
+        $orig = $this->db->query("SELECT domain FROM hb_accounts WHERE id = " . $this->id)->fetchColumn();
+
+        //si tiene domain, se queda el mismo
+        if (empty($orig)) {
+            $count = $this->db->query("SELECT count(*) AS num FROM hb_accounts WHERE domain = '$vpscloud'")->fetch();
+            $existe = (int) $count['num'];
+
+            //si ya existe uno igual, se genera uno aleatorio
+            while ($existe > 0) {
+                $vpscloud = "vps" . GigasUtilities::generateRandomString(8).".cloud";
+                $count = $this->db->query("SELECT count(*) AS num FROM hb_accounts where domain = '$vpscloud'");
+                $existe = (int) ($count->fetchColumn());
+            }
+            $q2 = $this->db->prepare("UPDATE hb_accounts SET domain = ? where id = ?");
+            $q2->execute(array($vpscloud, $this->id));
+        }
+    }
+
+    private function setIsVpsToYes($vmid, $type, $ip, $guaranteed_ram, $os, $extra, $vpsname = "")
+    {
+        $counter = $this->db->query(
+            "SELECT count(*) AS num FROM hb_vps_details WHERE account_id = " . $this->id
+        )->fetch();
+        //error_log("hemos encontrado " . print_r($counter,true));
+
+        if ($counter['num'] == 0) {
+            $q = $this->db->prepare(
+                "INSERT INTO hb_vps_details(account_id, veid, type, ip, guaranteed_ram, ".
+                "burstable_ram, os, extra) VALUES(?,?,?,?,?,?,?,?)"
+            );
+            $res = $q->execute(array($this->id, $vmid, $type, $ip, $guaranteed_ram, 0, $os, $extra));
+            //error_log("resultado $res");
+        }
+        $this->setDomain($vpsname);
+    }
+
+    private function setIsVpsToYesEmpty()
+    {
+        $counter = $this->db->query(
+            "SELECT count(*) AS num FROM hb_vps_details WHERE account_id = " . $this->id
+        )->fetch();
+
+        if ($counter['num']==0) {
+            $q = $this->db->prepare("INSERT INTO hb_vps_details(account_id) VALUES(?)");
+            $q->execute($this->id);
+        }
+
+        $this->setDomain("");
+    }
+
+    private function changeBackupType($orig_details, $dest_details)
+    {
+        $backup_type = $this->gapi->getBackupPolicy(
+            $orig_details['id'],
+            $dest_details['option108']['value']
+        );
+        $api = new GigasApi($this->api_connection);
+        $vms = $api->get(
+            '/virtual_machines',
+            array('cloud_id' => $orig_details['extra_details']['option6'])
+        )->json();
+        foreach ($vms as $vm) {
+            if ($vm['backup_type'] == $backup_type) {
+                continue;
+            }
+            $api->put(
+                '/virtual_machine/' . $vm['id'],
+                array('backup_type' => $backup_type)
+            );
+        }
+    }
+}

@@ -1,0 +1,72 @@
+# -*- coding: utf-8 -*-
+from api.handlers.base import GigasRequestHandler
+from api.libs.validation import integer_validator, boolean_translator_validator, address_to_integer
+from api.controllers.loader import get_controller
+from api.controllers import NetworkIpCtrl
+
+
+class IPAddressHandler(GigasRequestHandler):
+    handler_url = r"/ip_address/([0-9]+)"
+
+    def delete(self, ip_address_id):
+        ip_actions = get_controller(self.console, NetworkIpCtrl)
+        resp = ip_actions.delete(self.user_id, self.cloud_id, {"id": ip_address_id}, self.is_admin)
+        self.write_response(resp['code'], resp['response'])
+
+    def get(self, ip_address_id):
+        ip_actions = get_controller(self.console, NetworkIpCtrl)
+        resp = ip_actions.get(self.user_id, self.cloud_id, {"id": ip_address_id}, self.is_admin)
+        self.write_response(resp['code'], resp['response'])
+
+
+class IPAddressListHandler(GigasRequestHandler):
+    handler_url = r"/ip_addresses"
+
+    def get(self, *argv, **kwargs):
+        get_params = self.validate_and_filter_parameters(
+                parameters_accepted={
+                        'network_id': integer_validator,
+                        'address': ('ip_number', address_to_integer),
+                        'ip': ('ip_number', address_to_integer),
+                        'interface_id': integer_validator,
+                        'reserved': boolean_translator_validator,
+                        'public': boolean_translator_validator,
+                        },
+                parameters_required=set(),
+                parameters_ignored=set())
+
+        if 'reserved' in get_params:
+            if get_params.pop('reserved'):
+                get_params['network_id'] = None  # PARKING_NETWORK[self.console-1]
+            else:
+                get_params['~network_id'] = None  # PARKING_NETWORK[self.console-1]
+
+        ip_actions = get_controller(self.console, NetworkIpCtrl)
+        resp = ip_actions.get_all(self.user_id, self.cloud_id, get_params, self.is_admin)
+        self.write_response(resp['code'], resp['response'])
+
+
+class ReservePublicIPHandler(GigasRequestHandler):
+    handler_url = r"/ip_address"
+
+    _get_admin_cloud = lambda self: self._get_admin_cloud_from_header()
+
+    def post(self):
+        post_params = self.validate_and_filter_parameters(
+                    {'network_id': integer_validator},
+                    set(['network_id'])
+                )
+        ip_actions = get_controller(self.console, NetworkIpCtrl)
+        resp = ip_actions.reserve(self.user_id, self.cloud_id, post_params, self.is_admin)
+        self.write_response(resp['code'], resp['response'])
+
+
+class ReleasePublicIPHandler(GigasRequestHandler):
+    handler_url = r"/ip_address/([0-9]+)/release"
+
+    dont_change_cloud_methods = ["POST"]
+
+    def post(self, ip_address_id):
+        ip_actions = get_controller(self.console, NetworkIpCtrl)
+        resp = ip_actions.release(self.user_id, self.cloud_id, {"id": ip_address_id}, self.is_admin)
+        self.write_response(resp['code'], resp['response'])

@@ -1,0 +1,215 @@
+{
+    "HOST": "10.0.40.100",
+    "PORT": 8890,
+    "STATIC": {"path": "/var/www/gigas_api/static", "url": "/static"},
+
+    "DEBUG": true,
+    "SHOW_STACK": false,
+
+    "LOGFILE": "/tmp/gigapp.log",
+    "LOGFORMAT": "%(asctime)s %(name)s %(levelname)s:%(message)s",
+
+    "MAIL_ERRORS": ["devs@gigas.com", "root@gigas.com"],
+    "SMTP_SERVER": null,
+
+    "MODULES": {
+        "disabled": [
+            "submodule.testm_module2"
+        ],
+        "enabled": [
+            "auth",
+            "virtualmachine.virtualmachine",
+            "user.user",
+            "user.roles",
+            "user.permissions",
+            "console.console",
+            "console.console_group",
+            "storage.data_store_group",
+            "storage.data_store",
+            "storage.disk",
+            "image.backup",
+            "image.template_group",
+            "image.template",
+            "hypervisor.hypervisor_tier",
+            "hypervisor.hypervisor",
+            "network.network_group",
+            "network.network",
+            "network.network_interface",
+            "network.ip_address",
+            "network.firewall",
+            "taskq",
+            "loadbalancer.loadbalancer",
+            "autoscaling.autoscaling",
+            "resources.billing_plan",
+            "libvirtd.vm_xml",
+            "advancedbackup.advancedbackup",
+            "ping"
+        ]
+    },
+
+    "PROVIDERS": ["onapp", "onapp"],
+
+    "ONAPP": [
+        {
+            "host": "10.0.40.100",
+            "password": "3cafecd660d0a2f2e35e69159ac73fa3d20ffa22",
+            "port": 443,
+            "user": "apiguser@gigas.com"},
+        {
+            "host": "10.0.40.101",
+            "password": "3cafecd660d0a2f2e35e69159ac73fa3d20ffa22",
+            "port": 443,
+            "user": "apiguser@gigas.com"
+        }
+    ],
+    "ONAPP_AUTHENTICATION_KEY": [
+        "476aede036db8e3341345e2dfb95c71caa2f2c5a",
+        "476aede036db8e3341345e2dfb95c71caa2f2c5a"
+    ],
+
+    "HAL": [
+        {
+            "host": "10.0.40.100",
+            "password": "3cafecd660d0a2f2e35e69159ac73fa3d20ffa22",
+            "port": 8888,
+            "user": "apiguser@gigas.com"
+        },
+        {
+            "host": "10.0.40.101",
+            "password": "3cafecd660d0a2f2e35e69159ac73fa3d20ffa22",
+            "port": 8888,
+            "user": "apiguser@gigas.com"
+        }
+    ],
+
+    "AB_TEMPLATE_ID": [1215, 1215],
+    "AB_TEMPLATE_ID_SQL": "SELECT id FROM templates where label='{config.AB_TEMPLATE_NAME}'",
+    "AB_TEMPLATE_NAME": "BackupAvanzadoV3",
+
+    "LB_TEMPLATE_ID": [1102, 1102],
+    "LB_TEMPLATE_ID_SQL": "SELECT id FROM templates where label='{config.LB_TEMPLATE_NAME}'",
+    "LB_TEMPLATE_NAME": "GigasBalancer",
+
+    "NON_STRICT_VM_IDS": ["LB_TEMPLATE_ID", "AB_TEMPLATE_ID"],
+
+    "CLEAN_TRAFFIC_TEMPLATES": ["LB_TEMPLATE_ID"],
+    "NO_IP_BROADCAST_TEMPLATES": ["LB_TEMPLATE_ID"],
+    "NO_IP_MULTICAST_TEMPLATES": ["LB_TEMPLATE_ID"],
+
+    "MACHINE_LABEL_DELETE_QUEUE": "maquinaborradodiscosnoborrar",
+    "MEMORY_THRESHOLD_TIER_1": 4096,
+    "MEMORY_THRESHOLD_TIER_2": 32768,
+    "MIN_FREE_RAM": 10,
+
+    "DEFAULT_ROL_LABEL": "user",
+    "ROLE_MAPPING": [
+        {
+            "admin": "Administrator",
+            "advanced-backup": "User",
+            "load-balancer": "User",
+            "user": "User"
+        },
+        {
+            "admin": "Administrator",
+            "advanced-backup": "User",
+            "load-balancer": "User",
+            "user": "User"
+        }
+    ],
+    "AUTHTOKEN": {"expiration": 1800, "size": 24},
+    "SECRET": "secreto0secreto1secreto2secreto3",
+
+    "SAFE_KEYS": [[2, "AB_TEMPLATE_ID"], [2, "LB_TEMPLATE_ID"], [2, "PARKING_NETWORK"]],
+
+    "SATA_TIER": [4, 4],
+    "SATA_TIER_SQL": "select id from packs where label rlike '{config.SATA_TIER_NAME}'",
+    "SATA_TIER_NAME": "Tier *1",
+
+    "TIER_1": "Tier 1",
+    "TIER_2": "Tier 2",
+    "TIER_3": "Tier 3",
+
+    "PUBLIC_INTERFACE_RATE_LIMIT": 50,
+    "HV_PUBLIC_INTERFACE": "eth0",
+
+    "PARKING_NETWORK": [607, 607],
+    "PARKING_NETWORK_SQL": "SELECT id FROM networks where vlan={config.PARKING_VLAN}",
+    "PARKING_VLAN": 309,
+
+    "VLAN_DATA": [
+        {
+            "broadcast_number": 3232301055,
+            "disallowed_primary": false,
+            "gateway_number": 0,
+            "ipv4": true,
+            "network_number": 3232235520,
+            "prefix": 16},
+        {
+            "broadcast_number": 184549375,
+            "disallowed_primary": false,
+            "gateway_number": 0,
+            "ipv4": true,
+            "network_number": 167772160,
+            "prefix": 8
+        },
+        {
+            "broadcast_number": 2887778303,
+            "disallowed_primary": false,
+            "gateway_number": 0,
+            "ipv4": true,
+            "network_number": 2886729728,
+            "prefix": 12
+        }
+    ],
+
+    "VLAN_STARTING_VALUE": 310,
+    "VLAN_LAST_VALUE": 9999,
+
+    "WRITE_WITH_MAP": true,
+    "XML_GEN_BLACKLIST": [{}, {}],
+
+    "AMQP": {
+        "SERVER": "madrid",
+        "HOST": "10.0.32.12",
+        "PORT": 5672,
+        "USER": "guest",
+        "PASSWORD": "guest",
+        "DURABLE": true
+    },
+
+    "TRANS_EXCHANGE": "transactions",
+    "DEFAULT_LIMIT_RATE": "50",
+    "DEFAULT_CPU_SHARES": "1",
+
+    "OVM": {
+        "CONNECTION": {
+            "IP": "10.0.98.5",
+                "BASE_URL": "https://10.0.98.5:7002/ovm/core/wsapi/rest/",
+                "LOGIN": "toni.valverde",
+                "PASSWORD": "tonisux891",
+                "WAIT_FOR_JOB_TIMEOUT": 60
+        },
+        "HV_PUBLIC_INTERFACE": "eth0",
+        "CONSOLE_PORT": 7002
+    },
+
+    "DEFAULT_CPU_TYPE": "amd",
+    
+    "CORS": {
+        "CORS-ORIGIN": "*",
+        "CORS-HEADERS": "Accept,Content-type,Authorization",
+        "CORS-METHODS": "POST, GET, OPTIONS, PUT, DELETE",
+        "CORS-CREDENTIALS": true,
+        "CORS-MAX-AGE": 60,
+        "CORS-EXPOSE-HEADERS": "Location, Authorization"
+    },
+
+    "VIRSH_CPUS_CONFIG": {
+        "LIMIT_CPUS": 16,
+        "FIXED_SOCKETS": 4,
+        "STEP_CORES": 4,
+        "STOP_CORES": 4,
+        "STOP_SOCKETS": 4,
+        "MAX_CORES": 10000
+    }
+}

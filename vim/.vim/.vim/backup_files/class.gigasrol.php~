@@ -1,0 +1,1164 @@
+<?php
+
+include_once(MAINDIR . 'hbf/libs/passwordhash/class.passwordhash.php');
+
+class gigasrol extends OtherModule implements Observer
+{
+    protected $info = array(
+        "extras_menu" => true
+    );
+    protected $modname = 'Gigas Role Management';
+    protected $description = 'Management of role and product permissions';
+    protected $configuration = array(
+        "permission_blacklist" => array(
+            "value"=>"",
+            "type"=>"input",
+            "description"=>"Blacklist de los permisos, separar por comas"),
+        "category_blacklist" => array(
+            "value"=>"",
+            "type"=>"input",
+            "description"=>"Blacklist de categorias, separar por comas")
+    );
+
+    // Magic number used by Hostbill crypto functions - do not touch
+    protected $bcrypt_cost = 8;
+
+    const ROLE_NOT_FOUND = "Role could not be found|No se encontró el rol especificado";
+    const ROLE_EDIT_NOT_ALLOWED = "You cannot edit that role|No puedes editar ese rol";
+    const ROLE_EDIT_ERROR = "There was an error updating role details|Hubo un error al actualizar los detalles del rol";
+    const CANT_CREATE_ROL = "Could not create role|No se pudo crear el rol";
+
+    /**
+     * Create a PasswordHash instance, used to check and create passwords
+     * hashes.
+     */
+    private function newPasswordHash()
+    {
+        return new PasswordHash($this->bcrypt_cost, false);
+    }
+
+    public function blacklists ()
+    {
+        return array(
+            "permission_blacklist" => array_map(
+                trim,
+                explode(",", $this->configuration['permission_blacklist']['value'])
+            ),
+            "category_blacklist" => array_map(trim, explode(",", $this->configuration['category_blacklist']['value'])));
+    }
+
+    /* create tables here */
+    public function install()
+    {
+        $table_creation = array(
+            "CREATE TABLE IF NOT EXISTS gigas_roles ("
+            . "id INT NOT NULL AUTO_INCREMENT,"
+            . "name VARCHAR(64) NOT NULL,"
+            . "description VARCHAR(256),"
+            . "owner_id INT,"
+            . "CONSTRAINT gigas_grs_constraint UNIQUE (owner_id, name),"
+            . "PRIMARY KEY (ID))",
+
+            "CREATE TABLE IF NOT EXISTS gigas_permissions ("
+            . "id INT NOT NULL AUTO_INCREMENT,"
+            . "item VARCHAR(128),"
+            . "item_class ENUM('product', 'billing', 'support', 'domain', 'misc'),"
+            . "subclass_id int,"
+            . "description VARCHAR(256),"
+            . "allow INT(1) NOT NULL DEFAULT 1,"
+            . "PRIMARY KEY (id))",
+
+            "CREATE TABLE IF NOT EXISTS gigas_contact_role ("
+            . "role_id INT NOT NULL,"
+            . "contact_id INT NOT NULL,"
+            . "PRIMARY KEY (contact_id))",
+
+            "CREATE TABLE IF NOT EXISTS gigas_role_permissions ("
+            . "role_id INT NOT NULL,"
+            . "permission_id INT NOT NULL,"
+            . "CONSTRAINT gigas_grp_constraint UNIQUE (role_id, permission_id))");
+
+        foreach ($table_creation as $table) {
+            $query = $this->db->prepare($table);
+            $query->execute();
+        }
+        return true;
+    }
+
+    public function send_error($message)
+    {
+        return $this->addError($message);
+    }
+
+    public function send_info($message)
+    {
+        return $this->addInfo($message);
+    }
+
+    private function query_execute($query, $parameters)
+    {
+        try {
+            $result = $query->execute($parameters);
+        } catch (PDOException $exc) {
+
+            $traza = join(
+                "\r\n",
+                array_map(
+                    function ($tl) {
+                        return "file: " . $tl['file'] . " | line: " . $tl['line'] . " | function: " . $tl['function'];
+                    },
+                    $exc->getTrace()
+                )
+            );
+            hbm_log_error(
+                "Query error: " . $exc->getMessage()
+                . "\r\n on query: " . $query->queryString
+                . "\r\n trace: \r\n" . $traza,
+                true
+            );
+            $result = false;
+        }
+        return $result;
+    }
+
+    public function get_rol($role_id)
+    {
+        $q = "select * from gigas_roles where id=?";
+        $query = $this->db->prepare($q);
+        if ($this->query_execute($query, array($role_id))) {
+            return $query->fetch(PDO::FETCH_ASSOC);
+        }
+        return false;
+    }
+
+
+    public function get_contact_rol($contact_id)
+    {
+        $q = "select r.* from gigas_roles r "
+            . "join gigas_contact_role grc on grc.role_id=r.id "
+            . "where grc.contact_id=:contact";
+        $query = $this->db->prepare($q);
+        if ($this->query_execute($query, array("contact" => $contact_id))) {
+            return $query->fetch(PDO::FETCH_ASSOC);
+        }
+        return false;
+    }
+
+    /*
+      is the owner of the role or an admin
+     */
+    protected function can_edit_role($role)
+    {
+        $se = $_SESSION['AppSettings'];
+        if (isset($se['login'])) { // user or contact (or admin as any of those)
+            $login = $se['login'];
+            if (!(isset($login['contact_id'])) || ($login['privileges']['misc']['manageprofiles'] === 1)) {
+                // either is a client or is a contact which can manage contacts
+                $canI = (empty($role) || intval($se['login']['id']) == intval($role['owner_id']));
+                //$canI =  (intval($se['login']['id']) == intval($role['owner_id']));
+                if (!$canI) {
+                    hbm_log_error(
+                        "client: " . $se['login']['id']
+                        . " tried to edit rol " . $role['id']
+                        . " whose owner is " . $role['owner_id']
+                    );
+                }
+
+            } else {
+                $canI = false;
+                hbm_log_error("contact " . $login['contact_id'] . " can't edit roles");
+            }
+        } else {
+            $canI = isset($se['admin_login']);
+            if (!$canI) {
+                hbm_log_error("no login info and no admin");
+            }
+        }
+        return $canI;
+    }
+
+    public function get_permission($item, $class, $subclass_id = null)
+    {
+        $q = "SELECT * FROM gigas_permissions WHERE item = :item AND item_class= :class ";
+        $params = array(
+            'item'=>$item,
+            'class'=>$class
+        );
+        if (!empty($subclass_id)) {
+            $q = $q . " AND subclass_id = :subclass_id";
+            $params['subclass_id'] = $subclass_id;
+        }
+
+        $query = $this->db->prepare($q);
+        if ($this->query_execute($query, $params)) {
+            return $query->fetch(PDO::FETCH_ASSOC);
+        }
+        return false;
+    }
+
+    public function find_or_create_permission($item, $class, $subclass_id = null, $description = "")
+    {
+        $permission = $this->get_permission($item, $class, $subclass_id);
+        if (empty($permission)) {
+            $q = "INSERT INTO gigas_permissions (item, item_class, subclass_id, description)" .
+                " VALUES (:item, :class, :subclass_id, :description)";
+            $query = $this->db->prepare($q);
+            $params = array(
+                'item'=>$item,
+                'class'=>$class,
+                'subclass_id'=>$subclass_id,
+                'description'=>$description
+            );
+            if ($this->query_execute($query, $params)) {
+                $permission = $this->get_permission($item, $class, $subclass_id = null);
+            } else {
+                hbm_log_error("Error creating permission: " . print_r($this->db->errorInfo(), true));
+                return false;
+            }
+        }
+        return $permission;
+    }
+
+    public function permission_list_from_checkboxes($checkboxes)
+    {
+        $perm_list = array();
+        foreach ($checkboxes as $class_type => $class_group) {
+            foreach ($class_group as $product_id => $permissions) {
+                foreach ($permissions as $permission => $status) {
+                    if ($status == 'on') {
+                        if ($class_type == 'domain' || $class_type == 'product') {
+                            $perm_list[] = array(
+                                "item" => $permission,
+                                "item_class" => $class_type,
+                                "subclass_id" => intval($product_id)
+                            );
+                        } else {
+                            $perm_list[] = array(
+                                "item" => $permission,
+                                "item_class" => $class_type
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        return $perm_list;
+    }
+
+    protected function add_permissions_to_role($role_id, $permission_list)
+    {
+        $errors = false;
+        //hbm_log_error("adding permissions: " . print_r($permission_list, true));
+        foreach ($permission_list as $perm) {
+            $subclass_id = (!empty($perm['subclass_id']) ? $perm['subclass_id'] : null);
+            $permission = $this->find_or_create_permission($perm['item'], $perm['item_class'], $subclass_id);
+            if ($permission !== false) {
+                $qrp = "INSERT INTO gigas_role_permissions (role_id, permission_id) VALUES (:role_id, :permission_id)";
+                $query = $this->db->prepare($qrp);
+                if (!$this->query_execute($query, array('role_id'=>$role_id, 'permission_id'=>$permission['id']))) {
+                    hbm_log_error(
+                        "Error joining permission "
+                        . $permission['id'] . " with role $role_id : " . print_r($query->errorInfo(), true)
+                    );
+                    $errors = true;
+                }
+            }
+        }
+        if ($errors) {
+            $this->addError(
+                "Couldn't relate role with permission "
+                . "|No se pudo relacionar el rol con el permiso "
+            );
+        }
+    }
+
+    private function blacklist_in_clause($blacklist_name, $field_name)
+    {
+        if (!empty($this->configuration[$blacklist_name]['value'])) {
+            $cat_blacklist = join(
+                ", ",
+                array_map(
+                    function ($pbl) {
+                        return $this->db->quote(trim($pbl));
+                    },
+                    explode(",", $this->configuration[$blacklist_name]['value'])
+                )
+            );
+            return "not $field_name in ($cat_blacklist)";
+        }
+        return false;
+    }
+
+    /*
+      given some filters, get the list of permissions that match
+     */
+    public function get_permission_list(
+        $role_id = null,
+        $class = null,
+        $item = null,
+        $subclass_id = null,
+        $client_id = null
+    ) {
+        $q = "SELECT p.*, hp.name AS product_name , cat.name AS product_cat_name FROM gigas_permissions p "
+            . "LEFT JOIN hb_products hp ON p.subclass_id = hp.id "
+            . "LEFT JOIN hb_categories cat ON hp.category_id = cat.id ";
+        $where = array();
+        $params = array();
+        if (!empty($role_id)) {
+            $q = $q . " left join gigas_role_permissions rp on rp.permission_id=p.id";
+            $where[] = "rp.role_id = :role_id";
+            $params['role_id'] = $role_id;
+        }
+        if (!empty($class)) {
+            $where[] = "item_class = :class";
+            $params['class'] = $class;
+        }
+        if (!empty($item)) {
+            $where[] = "item = :item";
+            $params['item'] = $item;
+        }
+        if (!empty($subclass_id)) {
+            $where[] =  "subclass_id = :subclass_id";
+            $params['subclass_id'] = $subclass_id;
+        }
+        if (!empty($client_id)) {
+            $where[] = "(isnull(subclass_id) OR subclass_id IN "
+                . "(SELECT product_id FROM hb_accounts WHERE client_id = :client "
+                . "UNION SELECT tld_id AS product_id FROM hb_domains WHERE client_id = :client))";
+            $params["client"] = $client_id;
+        }
+        /* Blacklists de permisos y categorias */
+        $bl_perm = $this->blacklist_in_clause('permission_blacklist', 'item');
+        if ($bl_perm !== false) {
+            $where[] = $bl_perm;
+        }
+        $bl_cat = $this->blacklist_in_clause('category_blacklist', 'item_class');
+        if ($bl_cat !== false) {
+            $where[] = $bl_cat;
+        }
+
+        if (!empty($where)) {
+            $q = $q . " where " . join(" and ", $where) . " ORDER BY product_name ASC, p.description ASC";
+        }
+
+        $query = $this->db->prepare($q);
+        if (!$this->query_execute($query, $params)) {
+            hbm_log_error("Error looking for permissions for role #$role_id : " . print_r($query->errorInfo(), true));
+            return array();
+        }
+        $res = $query->fetchAll(PDO::FETCH_ASSOC);
+        $query->closeCursor();
+        return $res;
+    }
+
+    public function get_marked_permissions_for_role($role_id, $client_id = null)
+    {
+        $full_list = $this->get_permission_list(null, null, null, null, $client_id);
+        if (!empty($role_id)) {
+            $marked = array();
+            //reorder for insta-access
+            foreach ($this->get_permission_list($role_id) as $role) {
+                $marked[$role['id']] = $role;
+            }
+            foreach ($full_list as $key => $role) {
+                if (isset($marked[$role['id']])) {
+                    $full_list[$key]['checked'] = true;
+                }
+            }
+        }
+        return $full_list;
+    }
+
+    public function create_role($role_details, $permission_list = array())
+    {
+        if (!$this->can_edit_role(null)) {
+            $this->addError("You can't create a new role|No puedes crear un nuevo rol");
+            return false;
+        }
+        if (trim($role_details['name'])=='') {
+            $this->addError("Role name cannot be empty|El nombre del rol no puede estar vacío");
+            return false;
+        }
+
+        // overwrite with the user, nevermind if it was already set
+
+        if (isset($_SESSION['AppSettings']['login'])) {
+            $role_details['owner_id'] = $_SESSION['AppSettings']['login']['id'];
+        }
+
+        if (isset($role_details['owner_id'])) {
+            $q = "INSERT INTO gigas_roles (name, description, owner_id) VALUES (:name, :description, :owner_id)";
+        } else {
+            $q = "INSERT INTO gigas_roles (name, description) VALUES (:name, :description)";
+        }
+
+        $query = $this->db->prepare($q);
+        if ($this->query_execute($query, $role_details)) {
+            $role_id = $this->db->lastInsertId();
+        } else {
+            hbm_log_error("Error creating role : " . print_r($query->errorInfo(), true));
+            $this->addError(gigasrol::CANT_CREATE_ROL);
+            return false;
+        }
+
+        if ($role_id!=false) {
+            $this->add_permissions_to_role($role_id, $permission_list);
+        }
+        return $role_id;
+    }
+
+    public function delete_role($role_id)
+    {
+        $role = $this->get_rol($role_id);
+        if ($role === false) {
+            $this->addError(gigasrol::ROLE_NOT_FOUND);
+            return false;
+        }
+
+        if (!$this->can_edit_role($role)) {
+            $this->addError(gigasrol::ROLE_EDIT_NOT_ALLOWED);
+            return false;
+        }
+
+        // impedir si hay algun contacto usandolo
+        $q = "SELECT COUNT(*) FROM  gigas_contact_role WHERE role_id=?";
+        $query = $this->db->prepare($q);
+        $this->query_execute($query, array($role_id));
+        $count = $query->fetch();
+        $query->closeCursor();
+
+        if ($count[0] != 0) {
+            $this->addError("Can't delete a role which has users|No se puede borrar un rol que tenga usuarios");
+            return false;
+        }
+
+        // remove associated permissions
+        $dq = "DELETE FROM gigas_role_permissions where role_id = ?";
+        $query2 = $this->db->prepare($dq);
+        if ($query2->execute(array($role_id))) {
+            // remove the role
+            $drq = "DELETE FROM gigas_roles where id = ?";
+            $query3 = $this->db->prepare($drq);
+            if ($query3->execute(array($role_id))) {
+                $this->addInfo("Rol deleted successfully|Rol eliminado correctamente");
+                return true;
+            } else {
+                hbm_log_error("Error deleting role #$role_id : " . print_r($query3->errorInfo(), true));
+            }
+        } else {
+            hbm_log_error("Error deleting role #$role_id permissions " . print_r($query2->errorInfo(), true));
+        }
+        $this->addError("Error trying to delete the role|Error intentanto eliminar el rol");
+        return false;
+    }
+
+    /*
+      Get the list of roles, limit it to the ones the user can see
+     */
+
+    public function get_roles($client_id = null)
+    {
+        $q = "SELECT r.*, CONCAT(c.firstname, ' ', c.lastname) as owner_name FROM gigas_roles r "
+            . "LEFT JOIN hb_client_details c ON r.owner_id = c.id";
+        if (!empty($client_id)) {
+            $q = $q . " WHERE ISNULL(r.owner_id) OR r.owner_id = :client_id";
+        }
+        $query = $this->db->prepare($q);
+        $this->query_execute($query, array("client_id" => $client_id));
+        $results = $query->fetchAll(PDO::FETCH_ASSOC);
+        $query->closeCursor();
+        return $results;
+    }
+
+    public function get_permissions_from_list ($permission_list)
+    {
+        $q = "select * from gigas_permissions where ";
+        $permission_params = array();
+        foreach ($permission_list as $permission) {
+            if (isset($permission['subclass_id'])) {
+                $where[] = "(item = ? AND item_class = ? AND subclass_id = ?)";
+                array_push(
+                    $permission_params,
+                    $permission['item'],
+                    $permission['item_class'],
+                    $permission['subclass_id']
+                );
+            } else {
+                $where[] = "(item = ? AND item_class = ?)";
+                array_push($permission_params, $permission['item'], $permission['item_class']);
+            }
+        }
+        $q = $q . join(" OR ", $where) . " order by description asc";
+        //hbm_log_error("query is: $q");
+        $query = $this->db->prepare($q);
+        if (!$this->query_execute($query, $permission_params)) {
+            hbm_log_error("Error selecting permissions: " . print_r($query->errorInfo(), true));
+            return array();
+        }
+        return $query->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    private function remove_role_permissions($role_id)
+    {
+        $q = "delete from gigas_role_permissions where role_id=?";
+        $query = $this->db->prepare($q);
+        if (!$this->query_execute($query, array($role_id))) {
+            hbm_log_error("Error selecting permissions: " . print_r($query->errorInfo(), true));
+            return false;
+        }
+        return true;
+    }
+
+    public function get_role_contact_ids($role_id)
+    {
+        $q = "select contact_id from gigas_contact_role where role_id=:role";
+        $query = $this->db->prepare($q);
+        if ($this->query_execute($query, array("role"=>$role_id))) {
+            return array_map(
+                function ($x) {
+                    return $x[0];
+                },
+                $query->fetchAll(PDO::FETCH_NUM)
+            );
+        } else {
+            return array();
+        }
+    }
+
+    public function edit_role($role_id, $role_details, $permissions)
+    {
+        $role = $this->get_rol($role_id);
+        if (empty($role) || $role === false) {
+            $this->addError(gigasrol::ROLE_NOT_FOUND);
+            hbm_log_error("Role not found $role_id");
+            return false;
+        }
+        if (!$this->can_edit_role($role)) {
+            $this->addError(gigasrol::ROLE_EDIT_NOT_ALLOWED);
+            return false;
+        }
+        $q = "update gigas_roles set name=:name, description=:description where id=:id";
+        $query = $this->db->prepare($q);
+        if (!$this->query_execute(
+            $query,
+            array(
+                "name" => $role_details['name'],
+                "description" => $role_details['description'],
+                "id" => $role_id
+            )
+        )) {
+            $this->addError(gigasrol::ROLE_EDIT_ERROR);
+            return false;
+        }
+
+        //$original_permisions = $this->get_permission_list($role_id);
+        //$original_ids = array_map(function($perm) { return $perm['id'];}, $original_permisions);
+        // modificar los contactos que esten usando el rol
+        if (!$this->remove_role_permissions($role_id)) {
+            $this->addError("Error updating permissions|Error al actualizar los permisos");
+            return false;
+        }
+        $res = $this->add_permissions_to_role($role_id, $permissions);
+
+        foreach ($this->get_role_contact_ids($role_id) as $contact) {
+            if (!$this->updateContactPermissions($contact, $this->genContactPermissions($contact))) {
+                hbm_log_error("There was a problem updating permissions for contact " . $contact);
+            }
+        }
+        return $res;
+    }
+
+
+    public function set_role_to_contact($role_id, $contact_id)
+    {
+        // comprobar que es un contacto, no queremos capar a un cliente
+        $q_check = "SELECT parent_id FROM hb_client_details WHERE id=:contact";
+        $query_check = $this->db->prepare($q_check);
+        $params = array("contact" => $contact_id);
+        if (!$this->query_execute($query_check, $params) || !$query_check->fetchColumn()) {
+            hbm_log_error("Couldn't find $contact_id as contact");
+            return false;
+        }
+        $query_check->closeCursor();
+
+        if (!empty($role_id)) {
+            $q = "INSERT INTO gigas_contact_role (role_id, contact_id) "
+                . "VALUES (:role, :contact) "
+                . "ON DUPLICATE KEY UPDATE role_id=:role";
+
+            $params['role'] = $role_id;
+            $query = $this->db->prepare($q);
+            if (!$this->query_execute($query, $params)) {
+                hbm_log_error("Couldn't add role $role_id to contact $contact_id");
+                return false;
+            }
+        } else {
+            hbm_log_error("No role provided for contact $contact_id");
+            return false;
+        }
+        return true;
+    }
+
+    public function remove_role_from_contact($contact_id)
+    {
+        $q = "delete from gigas_contact_role where contact_id=:contact_id";
+        $query = $this->db->prepare($q);
+        return $this->query_execute($query, array("contact_id" => $contact_id));
+    }
+
+    public function gen_product_permissions($product_id)
+    {
+        // make a list with the permissions of a product
+        $q = "SELECT wc.id widget_id, wc.widget item, wc.name widget_name, "
+            . "if(hpt.type != 'DomainsType', 'product', 'domain') item_class, "
+            . "p.id subclass_id, p.name product_name FROM hb_widgets w "
+            . "LEFT JOIN hb_widgets_config wc ON wc.id = w.widget_id "
+            . "LEFT JOIN hb_products p ON p.id = w.target_id "
+            . "INNER JOIN hb_product_types hpt on hpt.id = p.type "
+            . "WHERE target_id=? AND target_type='Product'";
+
+        $query = $this->db->prepare($q);
+        $res = $this->query_execute($query, array($product_id));
+        if ($res === false) {
+            hbm_log_error("Error selecting permissions: " . print_r($this->db->errorInfo(), true));
+            return false;
+        }
+        $permissions = $query->fetchAll(PDO::FETCH_ASSOC);
+        $query->closeCursor();
+        return $permissions;
+    }
+
+    public function gen_all_products_permissions()
+    {
+        $q_basic = "SELECT if(hpt.type != 'DomainsType', 'product', 'domain') item_class, "
+            . "p.id subclass_id, p.name product_name "
+            . "FROM hb_products p "
+            . "INNER JOIN hb_product_types hpt ON hpt.id = p.type ";
+        $query_basic = $this->db->prepare($q_basic);
+        $res = $this->query_execute($query_basic);
+        $basic_permissions = array();
+        foreach ($query_basic as $basic) {
+            $basic_permissions[] = array(
+                "item" => "basic",
+                "item_class" => $basic['item_class'],
+                "subclass_id" => $basic['subclass_id'],
+                "widget_name" => "View basic details"
+            );
+            $basic_permissions[] = array(
+                "item" => "notify",
+                "item_class" => $basic['item_class'],
+                "subclass_id" => $basic['subclass_id'],
+                "widget_name" => "Receive related email notifications"
+            );
+            if ($basic['item_class'] == 'product') {
+                $basic_permissions[] = array(
+                    "item" => "billing",
+                    "item_class" => $basic['item_class'],
+                    "subclass_id" => $basic['subclass_id'],
+                    "widget_name" => "View billing info"
+                );
+                $basic_permissions[] = array(
+                    "item" => "cancelation",
+                    "item_class" => $basic['item_class'],
+                    "subclass_id" => $basic['subclass_id'],
+                    "widget_name" => "Request cancellation"
+                );
+                $basic_permissions[] = array(
+                    "item" => "upgrade",
+                    "item_class" => $basic['item_class'],
+                    "subclass_id" => $basic['subclass_id'],
+                    "widget_name" => "Upgrade / Downgrade"
+                );
+            } else {
+                $basic_permissions[] = array(
+                    "item" => "renew",
+                    "item_class" => $basic['item_class'],
+                    "subclass_id" => $basic['subclass_id'],
+                    "widget_name" => "Renew domain"
+                );
+                $basic_permissions[] = array(
+                    "item" => "ns",
+                    "item_class" => $basic['item_class'],
+                    "subclass_id" => $basic['subclass_id'],
+                    "widget_name" => "Modify nameservers"
+                );
+            }
+
+
+        }
+        $q = "SELECT wc.id widget_id, wc.widget item, wc.name widget_name, "
+            . "if(hpt.type != 'DomainsType', 'product', 'domain') item_class, "
+            . "p.id subclass_id, p.name product_name FROM hb_widgets w "
+            . "LEFT JOIN hb_widgets_config wc ON wc.id = w.widget_id "
+            . "LEFT JOIN hb_products p ON p.id = w.target_id "
+            . "INNER JOIN hb_product_types hpt on hpt.id = p.type "
+            . "WHERE target_type='Product' AND p.visible = TRUE ";
+            //. "AND hpt.type != 'DomainsType'";
+
+        $query = $this->db->prepare($q);
+        $res = $this->query_execute($query);
+        if ($res === false) {
+            hbm_log_error("Error selecting permissions: " . print_r($this->db->errorInfo(), true));
+            return false;
+        }
+        $permissions = $query->fetchAll(PDO::FETCH_ASSOC);
+        $query->closeCursor();
+        return array_merge($basic_permissions, $permissions);
+    }
+
+    public function gen_permission_hyerarchy($perm_list, $use_product_name = true)
+    {
+        if ($use_product_name) {
+            $field = 'product_name';
+        } else {
+            $field = 'subclass_id';
+        }
+        $hyer = array();
+        foreach ($perm_list as $permission) {
+            if ($permission['item_class'] == 'product' || $permission['item_class'] == 'domain') {
+                $hyer[$permission[$field]][] = $permission;
+            } else {
+                $hyer[$permission['item_class']][] = $permission;
+            }
+        }
+        return $hyer;
+    }
+
+    public function gen_permission_hyerarchy_with_categories($perm_list, $use_product_name = true)
+    {
+        if ($use_product_name) {
+            $field = 'product_name';
+        } else {
+            $field = 'subclass_id';
+        }
+        $hyer = array();
+        foreach ($perm_list as $permission) {
+            $cat = (empty($permission['product_cat_name']) ? "Common" : $permission['product_cat_name']);
+            if ($permission['item_class'] == 'product' || $permission['item_class'] == 'domain') {
+                $hyer[$cat][$permission[$field]][] = $permission;
+            } else {
+                $hyer[$cat][$permission['item_class']][] = $permission;
+            }
+        }
+        return $hyer;
+    }
+
+    public function getClientContacts($client_id)
+    {
+        $q =
+            "SELECT hbcd.id as id, hbcd.firstname as firstname, " .
+                "hbcd.lastname as lastname, hbca.email as email, " .
+                "hbca.lastlogin as lastlogin, gr.id as role_id, " .
+                "gr.name as role_name " .
+            "FROM hb_client_details as hbcd " .
+            "INNER JOIN hb_client_access as hbca " .
+                "ON hbcd.id = hbca.id " .
+            "LEFT JOIN gigas_contact_role as gcr " .
+                "ON gcr.contact_id = hbcd.id " .
+            "LEFT JOIN gigas_roles as gr " .
+                "ON gcr.role_id = gr.id " .
+            "WHERE hbcd.parent_id = :client_id " .
+            "AND hbca.status = 'Active' ";
+        $query = $this->db->prepare($q);
+        if (!$this->query_execute($query, array("client_id" => $client_id))) {
+            return array();
+        }
+        $contact_list = $query->fetchAll(PDO::FETCH_ASSOC);
+        if ($contact_list === false) {
+            return array();
+        }
+        foreach ($contact_list as $contact) {
+            if (empty($contact['role_id'])) {
+                $contact['role_id'] = 0;
+                $contact['role_name'] = "";
+            }
+        }
+        return $contact_list;
+    }
+
+    public function clientContactRoles($client_id)
+    {
+        // TODO: Comprobar si es necesario
+        $q = "SELECT c.id id, r.name role_name, r.id role_id FROM hb_client_details c "
+            . "LEFT JOIN hb_client_access hbca "
+                . "ON c.id = hbca.id "
+                . "AND hbca.status = 'Active' "
+            . "LEFT JOIN gigas_contact_role gcr ON gcr.contact_id=c.id "
+            . "LEFT JOIN gigas_roles r ON r.id=gcr.role_id "
+            . "WHERE c.parent_id = :client";
+
+        $query = $this->db->prepare($q);
+        if (!$this->query_execute($query, array("client" => $client_id))) {
+            return array();
+        }
+        $result = array();
+        foreach ($query->fetchAll(PDO::FETCH_ASSOC) as $role) {
+            if (!empty($role['role_name'])) {
+                $result[intval($role['id'])] = array(
+                    "name"=>$role['role_name'],
+                    "id"=>$role['role_id']
+                );
+            } else {
+                $result[intval($role['id'])] = array("name"=>"", "id"=>0);
+            }
+
+        }
+        return $result;
+    }
+
+    public function clientToContact($client_id, $parent_client_id, $role_id = null)
+    {
+        $q_check = "SELECT count(*) FROM hb_client_details where id=:client or id=:parent";
+        $query_check = $this->db->prepare($q_check);
+        $params = array('parent'=>$parent_client_id, 'client'=> $client_id);
+        if (!$this->query_execute($query_check, $params) || $query_check->fetchColumn() != 2) {
+            hbm_log_error("Could not find either the contact or the parent: " . print_r($params, true));
+            $this->addError(
+                "There was an error adding the contact, please notify support"
+                . "|Hubo un error al añadir el contacto, por favor, notifica a soporte"
+            );
+            return false;
+        }
+        //add query to add contact into client
+        $q = "UPDATE hb_client_details set parent_id=:parent where id=:client";
+        $query = $this->db->prepare($q);
+        if (!$this->query_execute($query, $params)) {
+            hbm_log_error("Could not find either the contact or the parent: " . print_r($params, true));
+            $this->addError(
+                "There was an error adding the contact, please notify support"
+                ."|Hubo un error al añadir el contacto, por favor, notifica a soporte"
+            );
+            return false;
+        }
+        $res = true;
+        hbm_log_error("role: $role_id");
+        if (!empty($role_id)) {
+            //add role to contact
+            $res = $this->set_role_to_contact($role_id, $client_id);
+        }
+        $this->addInfo("Contact added|Contacto añadido");
+        return $res;
+    }
+
+    public function genContactPermissions($contact_id)
+    {
+        //get the products
+        $q = "SELECT gp.* FROM gigas_contact_role gcr "
+            . "INNER JOIN gigas_role_permissions grp ON grp.role_id = gcr.role_id "
+            . "LEFT JOIN gigas_permissions gp ON grp.permission_id = gp.id "
+            . "WHERE gcr.contact_id = :contact";
+
+        $query = $this->db->prepare($q);
+        $params = array('contact'=>$contact_id);
+        $this->query_execute($query, $params);
+        $product_perm_list = $this->gen_permission_hyerarchy($query->fetchAll(PDO::FETCH_ASSOC), false);
+        $query->closeCursor();
+        $q_ac = "select * from hb_accounts where client_id=(select parent_id from hb_client_details where id=:contact)";
+        $query_ac = $this->db->prepare($q_ac);
+        $this->query_execute($query_ac, $params);
+        $acc_list = $query_ac->fetchAll(PDO::FETCH_ASSOC);
+        $perm_list = array();
+
+        foreach ($acc_list as $acc) {
+            $pl = array();
+            foreach ($product_perm_list[$acc['product_id']] as $p) {
+                $pl[$p['item']] = "1";
+            }
+            if (!empty($pl)) {
+                $perm_list['services'][$acc['id']] = $pl;
+            }
+        }
+
+        // get domains
+        $q_do = "SELECT id, tld_id AS product_id FROM hb_domains "
+            . "WHERE client_id=(SELECT parent_id FROM hb_client_details WHERE id=:contact)";
+        $query_do = $this->db->prepare($q_do);
+        $this->query_execute($query_do, $params);
+        $dom_list = $query_do->fetchAll(PDO::FETCH_ASSOC);
+        $dom_perm_list = array();
+        foreach ($dom_list as $dom) {
+            $pl = array();
+            foreach ($product_perm_list[$dom['product_id']] as $p) {
+                $pl[$p['item']] = "1";
+            }
+            if (!empty($pl)) {
+                $perm_list['domains'][$dom['id']] = $pl;
+            }
+        }
+
+        $q_misc = "SELECT gp.* FROM gigas_contact_role gcr "
+            . "INNER JOIN gigas_role_permissions grp ON grp.role_id = gcr.role_id "
+            . "LEFT JOIN gigas_permissions gp ON grp.permission_id = gp.id "
+            . "WHERE gcr.contact_id = :contact AND (gp.item_class != 'product' AND gp.item_class !='domain')";
+        $query_misc = $this->db->prepare($q_misc);
+        $this->query_execute($query_misc, $params);
+        $misc_list = $query_misc->fetchAll(PDO::FETCH_ASSOC);
+        $misc_perm_list = array();
+        foreach ($misc_list as $perm) {
+            $perm_list[$perm['item_class']][$perm['item']] = '1';
+        }
+        return $perm_list;
+    }
+
+    public function updateContactPermissions($contact_id, $perm_list)
+    {
+        //$perm_list = $this->genContactPermissions($contact_id);
+        if (!empty($perm_list)) {
+            $string_permissions = serialize($perm_list);
+        } else {
+            $string_permissions = serialize(null);
+        }
+        $q = "INSERT INTO hb_client_privileges (client_id, privileges) VALUES (:client, :priv_string) "
+            . "ON DUPLICATE KEY UPDATE privileges = :priv_string";
+        $query = $this->db->prepare($q);
+        return $this->query_execute(
+            $query,
+            array(
+                "priv_string" => $string_permissions,
+                "client"=>$contact_id
+            )
+        );
+    }
+
+    /**
+     * Return a client's parent ID.
+     * @param string $client_id
+     * @return string The client's parent ID, or `false` if the client ID
+     * doesn't exists.
+     * @throws Exception if an error happens.
+     */
+    public function getClientParentId($client_id)
+    {
+        $sql =
+            "SELECT parent_id " .
+            "FROM hb_client_details " .
+            "WHERE id = :client_id ";
+        $query = $this->db->prepare($sql);
+        if (!$this->query_execute($query, array("client_id" => $client_id))) {
+            throw new Exception("SQL error [" . $query->errorCode() . "] " .
+                $query->errorInfo()[2]);
+        }
+        return $query->fetchColumn();
+    }
+
+    /**
+     * Check if a client is a contact.
+     * @param string $client_id
+     * @return boolean `false` if is a normal client, `true` if is a contact,
+     * @throws Exception if the `$client_id` doesn't exists or if an error
+     * happens.
+     */
+    public function isContact($client_id)
+    {
+        $parent_id = $this->getClientParentId($client_id);
+        if ($parent_id === false) {
+            throw new Exception("Client ID #${client_id} doesn't exists");
+        }
+        return $parent_id != 0;
+    }
+
+    /**
+     * Returns an user's Hostbill permissions (or privileges) in its
+     * unserialized form.
+     * @param string $contact_id
+     * @return array The contact's permissions; for the format see the Contacts
+     * documentation.
+     */
+    public function getContactHostbillPermissions($contact_id)
+    {
+        $sql =
+            "SELECT privileges " .
+            "FROM hb_client_privileges " .
+            "WHERE client_id = :client_id";
+        $query = $this->db->prepare($sql);
+        if (!$this->query_execute($query, array("client_id" => $contact_id))) {
+            return null;
+        }
+        if ($query->rowCount() == 0) {
+            return null;
+        }
+        return unserialize($query->fetchColumn());
+    }
+
+    /**
+     * Check if a contact can access a products category.
+     * @param string $contact_id
+     * @param string $category_id
+     * @return bool `true` if the contact can access the products category,
+     * `false` otherwise.
+     */
+    public function canAccessProductCategory($contact_id, $category_id)
+    {
+        try {
+            if (!$this->isContact($contact_id)) {
+                return true;
+            }
+        } catch (Exception $e) {
+            hbm_log_error($e->getMessage());
+            // Error, we can't check the permissions - just returns `false`
+            return false;
+        }
+        $permissions = $this->getContactHostbillPermissions($contact_id);
+        if ($permissions === null) {
+            // Hostbill treats users with empty permissions as clients with
+            // full privileges, so let's make it happy and return `true`.
+            return true;
+        }
+        if (!array_key_exists('services', $permissions)) {
+            return false;
+        }
+        $products_allowed = array_keys($permissions['services']);
+        // We have to construct the IN clase by hand, including the field names.
+        $fields_names = array_map(
+            function ($v) {
+                return ":product_" . strval($v);
+            },
+            array_keys($products_allowed)
+        );
+        if (!is_integer($category_id)) {
+            $query = $this->db->prepare(
+                "SELECT id " .
+                "FROM hb_categories " .
+                "WHERE name = '" . $category_id . "'"
+            );
+            $this->query_execute($query);
+            $category_id = $query->fetchAll(PDO::FETCH_COLUMN, 0)[0];
+        }
+        $sql =
+            "SELECT DISTINCT(category_id) " .
+            "FROM hb_products as hbp " .
+            "INNER JOIN hb_accounts as hba " .
+            "ON hba.product_id = hbp.id " .
+            "AND hba.id IN (" . implode(', ', $fields_names) . ")";
+        $query = $this->db->prepare($sql);
+        if (!$this->query_execute($query, array_combine($fields_names, $products_allowed))) {
+            return false;
+        }
+        $categories_allowed = $query->fetchAll(PDO::FETCH_COLUMN, 0);
+        return in_array($category_id, $categories_allowed);
+    }
+
+    /**
+     * Check if the password of a contact is correct.
+     *
+     * @param string $contact_id
+     * @param string $password
+     * @return bool `true` is the password is correct, `false` otherwise.
+     */
+    public function checkPassword($contact_id, $password)
+    {
+        $sql =
+            "SELECT password " .
+            "FROM hb_client_access " .
+            "WHERE id = :id";
+        $query = $this->db->prepare($sql);
+        if (!$this->query_execute($query, array('id' => $contact_id))) {
+            return false;
+        }
+        $current_hash = $query->fetchColumn();
+        $query->closeCursor();
+        $hash = $this->newPasswordHash();
+        return ($hash->CheckPassword($password, $current_hash));
+    }
+
+    /**
+     * Check if a string can be considered a valid password based on the
+     * regular expression that checks our minimum standards for passwords.
+     *
+     * @param string $password
+     * @return bool `true` if the password is valid, `false` otherwise.
+     */
+    public function isValidPassword($password)
+    {
+        $sql =
+            "SELECT expression " .
+            "FROM hb_client_fields " .
+            "WHERE code = 'password'";
+        $query = $this->db->prepare($sql);
+        if (!$this->query_execute($query)) {
+            return false;
+        }
+        $validate_regex = $query->fetchColumn();
+        # TODO: Validate that the regex from db is really a valid regex
+        # (seems difficult in PHP since it doesn't have a compile or any similar function)
+        if (empty($validate_regex)) {
+            $validate_regex = "/.*/";
+        }
+        $query->closeCursor();
+        return preg_match($validate_regex, $password);
+    }
+
+    public function after_accountcreate ($details)
+    {
+        // añadir los permisos de producto a los contactos apropiados
+        hbm_log_error("rebuilding permission list after purchase");
+        $q = "SELECT * FROM hb_client_details c "
+            . "LEFT JOIN gigas_contact_role gcr ON gcr.contact_id = c.id "
+            . "WHERE parent_id = :parent AND gcr.role_id "
+            . "IN (SELECT DISTINCT(role_id) FROM gigas_role_permissions grp "
+            . "INNER JOIN gigas_permissions gp ON grp.permission_id = gp.id WHERE subclass_id = :product)";
+
+        $query = $this->db->prepare($q);
+        $this->query_execute(
+            $query,
+            array("product" => $details['product']['id'], "parent" => $details['service']['client_id'])
+        );
+        while ($client = $query->fetch(PDO::FETCH_ASSOC)) {
+            if (!$this->updateContactPermissions($client['id'], $this->genContactPermissions($client['id']))) {
+                hbm_log_error("There was a problem updating permissions for contact " . $client['id']);
+            }
+        }
+        return true;
+    }
+
+    public function after_domainregister ($details)
+    {
+        return $this->after_accountcreate($details);
+    }
+
+    public function after_domaintransfer($details)
+    {
+        return $this->after_accountcreate($details);
+    }
+
+    public function remove_contact($contact_id)
+    {
+        if (empty($contact_id)) {
+            hbm_log_error("Couldn't guess contact");
+            return false;
+        }
+
+        $sql =
+            "SELECT email " .
+            "FROM hb_client_access " .
+            "WHERE id = :contact_id ";
+        $query = $this->db->prepare($sql);
+        $this->query_execute($query, array(
+            "contact_id" => $contact_id
+        ));
+        $row = $query->fetch(PDO::FETCH_ASSOC);
+
+        if ($row === false) {
+            hbm_log_error("Can't find contact <$contact_id> email");
+            return false;
+        }
+
+        $sql =
+            "UPDATE hb_client_access " .
+            "SET status = 'Closed', " .
+            "email = :deleted_email " .
+            "WHERE id = :contact_id";
+        $query = $this->db->prepare($sql);
+        $this->query_execute($query, array(
+            "contact_id" => $contact_id,
+            "deleted_email" => $row['email'] . ".deleted." . strval(microtime(true))
+        ));
+
+        if ($query->rowCount() == 0) {
+            return false;
+        }
+
+        return true;
+    }
+
+}

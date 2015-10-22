@@ -1,0 +1,721 @@
+# -*- coding: utf-8 -*-
+from sqlalchemy.exc import (InvalidRequestError,
+                            OperationalError,
+                            IntegrityError)
+from sqlalchemy import or_, func, not_
+from sqlalchemy.orm.exc import (NoResultFound,
+                                MultipleResultsFound,
+                                UnmappedClassError)
+from sqlalchemy.orm.util import class_mapper
+from datetime import datetime
+from numbers import Number
+from managers.exceptions import (ResourceCreationException,
+                                 ManagerException,
+                                 ModificationFunctionError)
+from six import string_types
+from comfy import get_config
+import logging
+
+
+config = get_config('managers')
+logging.getLogger(config._project_name)
+PROVIDERS = config.PROVIDERS
+
+
+class ListIterator(object):
+    modfun = None
+
+    def __init__(self, sqlquery, load=None, modification_function=None):
+        self.query = sqlquery.__iter__()
+        self.session = sqlquery.session
+        self.modfun = modification_function
+        self.load = load
+
+    def next(self):
+        return self.__next__()
+
+    def __next__(self):
+        while True:
+            try:
+                return self._get_next()
+            except ModificationFunctionError as e:
+                logging.error('Error on iteration: {error}'.format(error=e))
+
+    def __iter__(self):
+        return self
+
+    def _get_object(self):
+        try:
+            value = next(self.query)
+        except StopIteration:
+            if self.session is not None:
+                self.session.close()
+                self.session = None
+            raise StopIteration
+
+        return value
+
+    def _get_next(self):
+        value = self._get_object()
+
+        if self.load is not None:
+            if isinstance(self.load, string_types):
+                logging.debug("loading %s into object" % self.load)
+                self._load_into_object(value, self.load)
+
+            else:
+                for attr in self.load:
+                    logging.debug("loading [%s] into object" % attr)
+                    self._load_into_object(value, attr)
+
+        value._make_read_only()
+
+        if self.modfun is not None:
+            return self.modfun(value)
+
+        return value
+
+    def _load_into_object(self, obj, attr_load):
+        """
+        load all the dot-separated relationships into the object
+        """
+        setattr(obj, '_with_load', attr_load)
+        current = obj
+        for attr in attr_load.split('.'):
+            if current is None:
+                break  # stop loading, there is no more stuff
+            current = getattr(current, attr)
+
+
+def _get_order_by_element(order_by):
+    if isinstance(order_by, string_types):
+        order_by = order_by, 'asc',
+    elif (isinstance(order_by, tuple)
+            and isinstance(order_by[0], string_types)
+            and isinstance(order_by[1], string_types)
+            and (order_by[1].lower() == 'asc' or order_by[1] == 'desc')):
+        order_by = order_by[0], order_by[1].lower()
+    else:
+        order_by = None
+    return order_by
+
+
+def _get_order_objects(lt, obj_class, default_order_field, reverse=False):
+    order_direction = 'desc' if reverse else 'asc'
+    if lt is None:
+        lt = [(default_order_field, order_direction,)]
+    elif isinstance(lt, string_types):
+        lt = [(lt, order_direction, )]
+    elif isinstance(lt, tuple):
+        lt = [lt]
+    elif isinstance(lt, list):
+        tmp = lt
+        lt = []
+        for row in tmp:
+            o = _get_order_by_element(row)
+            if o is None:
+                logging.exception('incorrect order_by field')
+                continue
+            lt.append(o)
+
+    alq_objs = []
+    for t in lt:
+        field, direction = t
+        default_order = 'desc' if direction == 'desc' else 'asc'
+        try:
+            alq_obj = getattr(getattr(obj_class, field), default_order)()
+            alq_objs.append(alq_obj)
+        except AttributeError:
+            logging.exception('incorrect order_by field: {order_by}'
+                              .format(order_by=field))
+            raise ManagerException('incorrect order_by field {order_by}'
+                                   .format(order_by=field))
+    return alq_objs
+
+
+class DBManager(object):
+    '''
+    get, update and list objects from the database
+    '''
+
+    # overwrite to value to be used as id
+    as_id = 'id'
+    modfun = None
+
+    def __init__(self, database, object_class, console, cloud_id,
+                 as_admin=False, modification_function=None,
+                 required_provider=None):
+        self.obj_class = object_class
+        self.database = database
+        self.console = console
+        self.cloud_id = cloud_id
+        self.admin = as_admin
+        self.modfun = modification_function
+        if console is None:
+            raise ManagerException("Console not configured")
+        if ((required_provider is not None) and (required_provider !=
+                                                 PROVIDERS[self.console - 1])):
+            raise ManagerException('Provider not supported')
+        self._session = None
+        if database.__name__ != object_class.__module__:
+            logging.error("Database %s does not contain a %s object",
+                          database.__name__, object_class.__name__)
+            raise TypeError("Database %s does not contain a %s object",
+                            database.__name__, object_class.__name__)
+
+    def _get_session(self):
+        if (self._session is None):
+            self._session = self.database.get_session(self.console)
+        return self._session
+
+    session = property(_get_session)
+
+    def _check_class(self, obj):
+        if obj.__class__ != self.obj_class:
+            raise TypeError("object class %s is not of type %s",
+                            obj.__class__, self.obj_class)
+        return True
+
+    def _cloud_filter(self, query):
+        '''
+        Override to filter by using the self.cloud_id properly as object_class
+        requires.
+        receives a query
+        returns a query
+        if not overriden, it requires being admin
+        '''
+        if self.admin:
+            return query
+        else:
+            logging.debug("#########################\n"
+                          "No no no! si no eres admin no te lo doy!\n"
+                          "#########################\n")
+            return None
+
+    def _admin_cloud_filter(self, query):
+        '''
+        override if you want to change what an admin can retrieve
+        by default, no filter is applied
+        '''
+        if not self.admin:
+            error = 'unauthorized access to _admin_cloud_filter'
+            logging.error(error)
+            raise ManagerException(error)
+        return query
+
+    def cloud_filter(self, query):
+        # do I have to pass through a cloud id filter?
+        if not self.admin:
+            if (self.cloud_id is None
+                    and not getattr(self, 'api_user_id', False)):
+                logging.error('an unknown user is trying to access a resource')
+                raise ManagerException()
+                return None
+            query = self._cloud_filter(query)
+        else:
+            query = self._admin_cloud_filter(query)
+        return query
+
+    def _load_into_object(self, obj, attr_load):
+        """
+        load all the dot-separated relationships into the object
+        """
+        setattr(obj, '_with_load', attr_load)
+        current = obj
+        for attr in attr_load.split('.'):
+            if current is None:
+                break  # stop loading, there is no more stuff
+            current = getattr(current, attr)
+
+    def get_object(self, identifier, and_expunge=True, load=None,
+                   modification_function=None, with_lock=None):
+        if identifier is None:
+            logging.error('identifier is None')
+            raise ManagerException()
+            return None
+
+        if not hasattr(identifier, 'keys'):
+            try:
+                identifier = {self.as_id: int(identifier)}
+            except TypeError:
+                logging.error('identifier cannot be cast to int')
+                raise ManagerException()
+                return None
+
+        query = self.session.query(self.obj_class)
+
+        query = self._apply_filters(query, identifier)
+        if query is None:
+            logging.error('query is None')
+            raise ManagerException()
+            return None
+
+        query = self.cloud_filter(query)
+        if query is None:
+            logging.error('query is None')
+            raise ManagerException()
+            return None
+
+        if with_lock is not None:
+            query = query.with_lockmode(with_lock)
+            and_expunge = False
+
+        try:
+            result = query.one()
+        except NoResultFound:
+            self.session.close()
+            self._session = None
+            return None
+        except:  # any other, close the session and reraise
+            self.session.close()
+            self._session = None
+            raise
+
+        if and_expunge:
+            # anything to load before expunge?
+            if load is not None:
+                if isinstance(load, string_types):
+                    logging.debug("loading %s into object" % load)
+                    self._load_into_object(result, load)
+
+                else:
+                    for attr in load:
+                        logging.debug("loading [%s] into object" % attr)
+                        self._load_into_object(result, attr)
+
+            result._make_read_only()
+            self.session.close()
+            self._session = None
+        elif not with_lock:
+            self._session = None
+
+        if self.modfun is not None:
+            return self.modfun(result)
+        return result
+
+    def _is_sa_object(self, instance):
+        try:
+            class_mapper(type(instance))
+        except UnmappedClassError:
+            return False
+        else:
+            return True
+
+    def _gen_clause(self, filter_field, value):
+        print filter_field
+        if filter_field.startswith('~'):
+            if filter_field.endswith('?'):
+                if not isinstance(value, string_types):
+                    logging.error("LIKE needs a string")
+                    raise ManagerException()
+                    return None
+
+                return not_(getattr(self.obj_class, filter_field[1:-1])
+                            .like(value))
+            else:
+                return (getattr(self.obj_class, filter_field[1:]) != value)
+        elif filter_field.endswith('<='):
+            return (getattr(self.obj_class, filter_field[:-2]) <= value)
+        elif filter_field.endswith('<'):
+            return (getattr(self.obj_class, filter_field[:-1]) < value)
+        elif filter_field.endswith('>='):
+            return (getattr(self.obj_class, filter_field[:-2]) >= value)
+        elif filter_field.endswith('>'):
+            return (getattr(self.obj_class, filter_field[:-1]) > value)
+        else:
+            if filter_field.endswith('?'):
+                if not isinstance(value, string_types):
+                    logging.error("LIKE needs a string")
+                    raise ManagerException()
+                    return None
+
+                return getattr(self.obj_class, filter_field[:-1]).like(value)
+            else:
+                return (getattr(self.obj_class, filter_field) == value)
+
+    def _paginate(self, query, limit=None, offset=None):
+        if limit is not None:
+            try:
+                lim = int(limit)
+            except (ValueError, TypeError):
+                logging.error("limit is not a valid value: %s", limit)
+            else:
+                query = query.limit(lim)
+
+        if offset is not None:
+            try:
+                off_by = int(offset)
+            except (ValueError, TypeError):
+                logging.error("offset is not a valid value: %s", offset)
+            else:
+                query = query.offset(off_by)
+
+        return query
+
+    def _apply_filters(self, query, filters):
+        """
+        gets a dictionary and applies it as filters to the query parameter
+
+        prepend ~ to the name of the field to get a not equal
+
+        append ? to the name of the field to get a like
+
+        if value is a list, then it will look for any value on the list,
+        having a not will exclude values
+
+        if field name starts with an '&' it will make an and of the list
+
+        If any error happens, it'll return None
+
+        """
+
+        has_or = False
+        or_filter = {}
+
+        for fltr in filters:
+            if (filters[fltr] is not None
+                    and not isinstance(filters[fltr], (string_types,
+                                                       Number, bool,
+                                                       datetime))):
+                if fltr.startswith(('~', '&')):  # not in, in all
+                    noand_fltr = fltr
+                    if fltr.startswith('&'):
+                        noand_fltr = fltr[1:]
+                        if noand_fltr.startswith('~'):
+                            raise ValueError("Cannot understand your request,"
+                                             " did you mean to use only '~'?")
+                    if filters[fltr]:
+                        try:
+                            for value in filters[fltr]:
+                                query = query.filter(
+                                    self._gen_clause(noand_fltr, value))
+                        except InvalidRequestError:
+                            logging.error("invalid <not in> filter %s", fltr)
+                            raise ManagerException()
+                            return None
+
+                else:  # in
+                    if filters[fltr]:
+                        has_or = True
+                        # sacamos de uno para meter en el otro
+                        or_filter[fltr] = [self._gen_clause(fltr, value)
+                                           for value in filters[fltr]]
+                    else:
+                        # nada va a cuadrar ;)
+                        query = query.filter(False)
+            else:
+                try:
+                    query = query.filter(self._gen_clause(fltr, filters[fltr]))
+
+                except InvalidRequestError:
+                    logging.error("invalid filter %s" % fltr)
+                    raise ManagerException()
+                    return None
+
+        if has_or:
+            try:
+                for fltr in or_filter:
+                    query = query.filter(or_(*or_filter[fltr]))
+            except InvalidRequestError:
+                logging.error("invalid <in> filter %s" % fltr)
+                raise ManagerException()
+                return None
+
+        return query
+
+    def get_non_nullable_fields(self):
+        """
+        returns all non nullable fields which are not a primary key
+        """
+        return {a.name
+                for a in self.obj_class.__table__.c
+                if not a.nullable and not a.primary_key}
+
+    def get_list(self, filters=None, order_by=None, load=None, group_by=None,
+                 list_iterator=ListIterator, limit=None, offset=None):
+        '''
+        - en el order by espera una de estas combinaciones
+        - (si no se le pasa una tupla asume que el sentido es 'asc')
+        - None
+        - 'label'
+        - 'label', 'desc'
+        - [ 'label', 'id' ]
+        - [ ('label','desc'), ('id', 'asc') ]
+        - [ 'label', 'id' ]
+        '''
+        query = self.session.query(self.obj_class)
+
+        if filters is not None and hasattr(filters, 'keys'):
+            query = self._apply_filters(query, filters)
+            if query is None:
+                return [].__iter__()
+
+        query = self.cloud_filter(query)
+        if query is None:
+            return [].__iter__()
+
+        alq_objs = _get_order_objects(order_by, self.obj_class,
+                                      default_order_field=self.as_id)
+        query = query.order_by(*alq_objs)
+
+        if group_by:
+            query = query.group_by(getattr(self.obj_class, group_by))
+
+        query = self._paginate(query, limit, offset)
+        # force to ask for a new session next time as this is currently
+        # used by iterator
+        self._session = None
+
+        return list_iterator(query, load=load,
+                             modification_function=self.modfun)
+
+    def get_query(self, filters=None, limit=None, offset=None):
+        query = self.session.query(self.obj_class)
+
+        if filters is not None and hasattr(filters, 'keys'):
+            query = self._apply_filters(query, filters)
+            if query is None:
+                return [].__iter__()
+
+        query = self._paginate(query, limit, offset)
+        return self.cloud_filter(query)
+
+    def get_fresh_copy(self, obj, and_expunge=True, load=None):
+        self._check_class(obj)
+        query = self.session.query(self.obj_class).filter_by(
+            **{self.as_id: getattr(obj, self.as_id)}
+        )
+        try:
+            new_version = query.one()
+        except (NoResultFound, MultipleResultsFound):
+            new_version = None
+
+        if new_version is not None and and_expunge:
+            load = load or getattr(obj, '_with_load', None)
+            if load is not None:
+                if isinstance(load, string_types):
+                    logging.debug("loading %s into object" % load)
+                    self._load_into_object(new_version, load)
+                else:
+                    for attr in load:
+                        logging.debug("loading [%s] into object" % attr)
+                        self._load_into_object(new_version, attr)
+            new_version._make_read_only()
+            self.session.close()
+            self._session = None
+        else:
+            self._session = None
+
+        if new_version is not None and self.modfun is not None:
+            return self.modfun(new_version)
+        return new_version
+
+    def _set_to_session(self, obj):
+        if self._is_sa_object(obj):
+            return self.session.merge(obj)
+        if isinstance(obj, list):
+            return self._list_to_same_session(obj)
+        # para que recorra completamente el arbol habria que considerar añadir
+        # tambien los dict, pero no deberia ser necesario
+        return obj
+
+    def _list_to_same_session(self, update_list):
+        return map(self._set_to_session, update_list)
+
+    def _dict_to_same_session(self, field_dict):
+        for key in field_dict:
+            field_dict[key] = self._set_to_session(field_dict[key])
+        return field_dict
+
+    def update_fields(self, obj, fields_to_update):
+        '''
+        update a detached object
+        '''
+        self._check_class(obj)
+        fields_to_update = self._dict_to_same_session(fields_to_update)
+        newobj = self._set_to_session(obj)
+
+        nonnul = self.get_non_nullable_fields()
+
+        for attr in fields_to_update:
+            if fields_to_update[attr] is None and attr in nonnul:
+                raise ManagerException(
+                    "Tried to make null a non nullable field")
+            setattr(newobj, attr, fields_to_update[attr])
+
+        if hasattr(newobj, 'updated_at'):
+            newobj.updated_at = datetime.utcnow()
+
+        try:
+            self.session.commit()
+            return self.get_fresh_copy(obj)
+        except IntegrityError:
+            raise ManagerException("Invalid value, already exists on database")
+
+    def _delete(self, obj):
+        '''
+        delete an object in the session
+        '''
+        self.session.delete(obj)
+        self.session.commit()
+        self._session = None
+        return True
+
+    def delete_by_id(self, obj_id):
+        try:
+            query = (self.session.query(self.obj_class)
+                     .filter_by(**{self.as_id: obj_id}))
+            query = self.cloud_filter(query)
+            new_obj = query.one()
+        except NoResultFound:
+            return None
+        except MultipleResultsFound:
+            return False
+        return self._delete(new_obj)
+
+    def delete(self, obj):
+        '''
+        deletes a detached object
+        '''
+        self._check_class(obj)
+        try:
+            new_obj = (self.session.query(self.obj_class)
+                       .filter_by(**{self.as_id: getattr(obj, self.as_id)})
+                       .one())
+        except NoResultFound:
+            return None
+        except MultipleResultsFound:
+            return False
+        return self._delete(new_obj)
+
+    def get_last_object(self, identifier={}, and_expunge=True, order_by="id",
+                        load=None, with_lock=None, offset=None):
+        if not isinstance(order_by, string_types):
+            raise TypeError("order_by must be instance of basestring (py2) "
+                            "or str (py3)")
+        return self.get_first_object(identifier, and_expunge,
+                                     [(order_by, "desc")],
+                                     load, with_lock, offset)
+
+    def get_first_object(self, identifier={}, and_expunge=True,
+                         order_by="id", load=None, with_lock=None,
+                         offset=None):
+        if identifier is None:
+            raise ManagerException("identifier can't be None")
+        if not hasattr(identifier, 'keys'):
+            identifier = {self.as_id: int(identifier)}
+
+        query = self._apply_filters(self.session.query(self.obj_class),
+                                    identifier)
+        if query is None:
+            logging.error('query is None')
+            raise ManagerException()
+            return None
+        query = self.cloud_filter(query)
+        if query is None:
+            logging.error('query is None')
+            raise ManagerException()
+            return None
+
+        alq_objs = _get_order_objects(order_by,
+                                      self.obj_class,
+                                      default_order_field=self.as_id)
+        query = query.order_by(*alq_objs)
+        query = self._paginate(query, None, offset)
+
+        if with_lock is not None:
+            query = query.with_lockmode(with_lock)
+            and_expunge = False
+
+        if query is None:
+            logging.error('query is None')
+            raise ManagerException()
+            return None
+        result = query.first()
+
+        if result is None:
+            self.session.close()
+            self._session = None
+            return result
+
+        if and_expunge:
+            if load is not None:
+                if isinstance(load, string_types):
+                    logging.debug("loading %s into object" % load)
+                    self._load_into_object(result, load)
+
+                else:
+                    for attr in load:
+                        logging.debug("loading [%s] into object" % attr)
+                        self._load_into_object(result, attr)
+
+            result._make_read_only()
+            self.session.close()
+            self._session = None
+        elif not with_lock:
+            self._session = None
+        if self.modfun is not None:
+            return self.modfun(result)
+        return result
+
+    def create_object(self, parameters):
+        if self.obj_class is None:
+            logging.error("Object not configured")
+            raise ManagerException()
+            return None
+        try:
+            obj = self.obj_class(**parameters)
+        except NameError as e:
+            obj_id = None
+            logging.error(
+                "Invalid parameter list while trying to create a %s: %s",
+                self.obj_class.__name__, parameters)
+            raise ManagerException()
+        try:
+            nonnul = self.get_non_nullable_fields()
+
+            if not nonnul.issubset(set(parameters)):
+                raise ManagerException(
+                    "Didn't provide a value for a nonnullable field: %s",
+                    nonnul - set(parameters))
+
+            self.session.add(obj)
+            self.session.flush()
+            obj_id = getattr(obj, self.as_id)
+            self.session.commit()
+            self.session.close()
+            self._session = None
+
+        except OperationalError as e:
+            obj_id = None
+            logging.error("Error creating %s: %s",
+                          self.obj_class.__name__, e)
+            self.session.rollback()
+            self.session.close()
+            self._session = None
+            raise ManagerException()
+
+        except IntegrityError as e:
+            obj_id = None
+            msg = "Duplicated %s: %s" % (self.obj_class.__name__, e)
+            logging.error(msg)
+            self.session.rollback()
+            self.session.close()
+            self._session = None
+            raise ResourceCreationException(msg)
+
+        return obj_id
+
+    def get_count(self, filters=None):
+        query = self.session.query(func.count(getattr(self.obj_class,
+                                                      self.as_id)))
+        if filters is not None:
+            query = self._apply_filters(query, filters)
+        query = self.cloud_filter(query)
+        if query.count() > 1:
+            count = sum([c[0] for c in query.all()])
+        else:
+            count = query.scalar()
+        self.session.close()
+        self._session = None
+        return count

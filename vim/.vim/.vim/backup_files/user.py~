@@ -1,0 +1,249 @@
+# pylint: disable=arguments-differ
+# -*- coding: utf-8 -*-
+
+from api.handlers.base import GigasRequestHandler, admin_only
+from managers.vm_manager import VirtualMachineManager
+from api.libs.validation import (str_validator_generator, integer_validator,
+                                 name_validator, email_validator,
+                                 login_validator,
+                                 integer_range_validator_generator)
+import logging
+from api.controllers.loader import get_controller
+from api.controllers.controllers import UserCtrl
+from api.controllers import VirtualMachineCtrl
+
+
+class ApiUserHandler(GigasRequestHandler):
+    handler_url = r"/api_user/([0-9]+)"
+
+    dont_change_cloud_methods = ["PUT", "GET", "DELETE"]
+
+    def put(self, id):
+        mod_params = self.validate_and_filter_parameters(
+            parameters_accepted={
+                'email': email_validator,
+                'first_name': name_validator,
+                'last_name': name_validator,
+                'password': str_validator_generator(max_size=40,
+                                                    min_size=6,
+                                                    valid_expr=None),
+                'time_zone': str_validator_generator(max_size=40,
+                                                     min_size=2,
+                                                     valid_expr=r"^[\w/\-]+$"),
+                'locale': str_validator_generator(max_size=20,
+                                                  min_size=2,
+                                                  valid_expr=r"^[\w\-\.]+$"),
+                'console_id': integer_validator,
+                'status': str_validator_generator(
+                    valid_expr="^(Active|Suspended|Cancelled)$"),
+                'role': str_validator_generator(max_size=40,
+                                                min_size=2,
+                                                valid_expr=r"^[\w/\-]+$"),
+                'karma': integer_range_validator_generator(0, 5),
+            },
+            parameters_required=set(),
+            admin_only_parameters=['password', 'console_id', 'status', 'role',
+                                   'karma'])
+
+        mod_params['id'] = id
+        user_actions = get_controller(self.console, UserCtrl)
+        edited_user = user_actions.edit_api_user(self.user_id,
+                                                 self.cloud_id,
+                                                 mod_params,
+                                                 self.is_admin)
+        self.write_response(200, edited_user)
+
+        if 'password' in mod_params or 'console_id' in mod_params:
+            logging.info("Invalidating user (%s) tokens" % id)
+            self.redis.invalidate_user_tokens(id)
+
+    def get(self, id):
+        user_actions = get_controller(self.console, UserCtrl)
+        iterator = user_actions.get_api_user(self.user_id,
+                                             self.cloud_id,
+                                             {'id': id},
+                                             self.is_admin)
+        try:
+            user = iterator.next()
+        except StopIteration:
+            self.write_response(404, "User not found")
+        else:
+            self.write_response(200, user)
+
+    @admin_only
+    def delete(self, id):
+        self.validate_and_filter_parameters({})
+        logging.info("Invalidating user {uid} token".format(uid=id))
+        self.redis.invalidate_user_tokens(id)
+        user_actions = get_controller(self.console, UserCtrl)
+        resp = user_actions.delete_api_user(self.user_id,
+                                            self.cloud_id,
+                                            {'id': id},
+                                            self.is_admin)
+        self.write_response(resp['code'], resp['response'])
+
+
+class ApiUserListHandler(GigasRequestHandler):
+    handler_url = r"/api_users"
+
+    def get(self, *argv, **kwargs):
+        filters = self.validate_and_filter_parameters(
+            {
+                "id": integer_validator,
+                "login": login_validator,
+                "status": str_validator_generator(),
+                "cloud_id": integer_validator,
+            })
+        user_actions = get_controller(self.console, UserCtrl)
+        self.write_response(200, user_actions.get_api_user(self.user_id,
+                                                           self.cloud_id,
+                                                           filters,
+                                                           self.is_admin))
+
+
+class CreateApiUserHandler(GigasRequestHandler):
+    handler_url = r"/api_user"
+    _post_parameters_required = set([
+        'email', 'first_name', 'last_name', 'login', 'password', ])
+    _post_parameters_accepted = {
+        'email': email_validator,
+        'first_name': name_validator,
+        'last_name': name_validator,
+        'login': login_validator,
+        'password': str_validator_generator(max_size=40,
+                                            min_size=6,
+                                            valid_expr=None),
+        'time_zone': str_validator_generator(max_size=40,
+                                             min_size=2,
+                                             valid_expr=r"^[\w/\-]+$"),
+        'locale': str_validator_generator(max_size=20,
+                                          min_size=2,
+                                          valid_expr=r"^[\w\-\.]+$"),
+        'role': str_validator_generator(
+            max_size=20,
+            min_size=2,
+            valid_expr=r"^[a-zA-Z áéíóúÁÉÍÓÚÑñ\-]+$"),
+        'base_resource_id': integer_validator,
+        'cloud_login': str_validator_generator(max_size=40,
+                                               min_size=6,
+                                               to_lower=True),
+        'cloud_password': str_validator_generator(max_size=40,
+                                                  min_size=6,
+                                                  valid_expr=None),
+        'karma': integer_range_validator_generator(0, 5),
+        }
+
+    dont_change_cloud_methods = ["POST"]
+
+    @admin_only
+    def post(self):
+        post_params = self.validate_and_filter_parameters(
+            self._post_parameters_accepted,
+            self._post_parameters_required)
+        user_actions = get_controller(self.console, UserCtrl)
+        new_api_user = user_actions.add_api_user(self.user_id,
+                                                 self.cloud_id,
+                                                 post_params,
+                                                 self.is_admin)
+        self.write_response(201, new_api_user)
+
+
+class MapApiUserHandler(GigasRequestHandler):
+    handler_url = r"/api_user/map"
+    _post_parameters_required = set([
+        'login', 'password', 'cloud_login', 'cloud_password'])
+    _post_parameters_accepted = {
+        'login': login_validator,
+        'password': str_validator_generator(max_size=40,
+                                            min_size=6,
+                                            valid_expr=None),
+        'role': str_validator_generator(
+            max_size=20,
+            min_size=2,
+            valid_expr=r"^[a-zA-Z áéíóúÁÉÍÓÚÑñ\-]+$"),
+        'cloud_login': str_validator_generator(max_size=40,
+                                               min_size=6,
+                                               to_lower=True),
+        'cloud_password': str_validator_generator(max_size=40,
+                                                  min_size=6,
+                                                  valid_expr=None),
+        'karma': integer_range_validator_generator(0, 5)}
+
+    dont_change_cloud_methods = ["POST"]
+
+    @admin_only
+    def post(self):
+        post_params = self.validate_and_filter_parameters(
+            self._post_parameters_accepted,
+            self._post_parameters_required)
+        post_params['console_id'] = self.console
+        user_actions = get_controller(self.console, UserCtrl)
+        new_api_user = user_actions.map_api_user(self.user_id,
+                                                 self.cloud_id,
+                                                 post_params,
+                                                 self.is_admin)
+        self.write_response(201, new_api_user)
+
+
+class ApiUserBwHandler(GigasRequestHandler):
+    handler_url = r"/bw_stats"
+
+    def get(self):
+        get_params = self.validate_and_filter_parameters(
+            parameters_accepted={
+                'period': str_validator_generator(
+                    valid_expr=r"^(-1H|-1M|-1Y|-1day)$"
+                ),
+            },
+            parameters_required=set(['period']),
+            parameters_ignored=set(),
+            admin_only_parameters=set()
+        )
+
+        vm_actions = get_controller(self.console, VirtualMachineCtrl)
+        resp = vm_actions.get_bw_usage(self.user_id,
+                                          self.cloud_id,
+                                          get_params,
+                                          self.is_admin,
+                                          VirtualMachineManager)
+        self.write_response(resp['code'], resp['response'])
+
+
+class ApiUserCheckHandler(GigasRequestHandler):
+    handler_url = r"/api_user/([0-9]+)/repair"
+
+    _post_parameters_required = set(['api_login',
+                                     'api_password',
+                                     'cloud_login',
+                                     'cloud_password',
+                                     'status'])
+
+    _post_parameters_accepted = {
+        'api_login': str_validator_generator(max_size=40,
+                                             min_size=6,
+                                             to_lower=True),
+        'api_password': str_validator_generator(max_size=40,
+                                                min_size=6,
+                                                valid_expr=None),
+        'cloud_login': str_validator_generator(max_size=40,
+                                               min_size=6,
+                                               to_lower=True),
+        'cloud_password': str_validator_generator(max_size=40,
+                                                  min_size=6,
+                                                  valid_expr=None),
+        'status': str_validator_generator(valid_expr="^(Active|Suspended)$"),
+    }
+
+    dont_change_cloud_methods = ["POST"]
+
+    @admin_only
+    def post(self, id):
+        post_params = self.validate_and_filter_parameters(
+            self._post_parameters_accepted,
+            self._post_parameters_required)
+        user_actions = get_controller(self.console, UserCtrl)
+        resp = user_actions.check_login_pass(self.user_id,
+                                             self.cloud_id,
+                                             post_params,
+                                             self.is_admin)
+        self.write_response(resp['code'], resp['response'])

@@ -1,0 +1,611 @@
+# -*- coding: utf-8 -*-
+import os.path
+import re
+import random
+import string
+import datetime
+import MySQLdb as Database
+from pycurl import error as pycurl_error
+from warnings import filterwarnings
+from phpserialize import loads
+import logging
+
+from django.utils.encoding import smart_str
+from django.db import models, connection
+from django.core import urlresolvers
+from django.db.models.loading import get_model
+from django.core.mail import send_mail
+from django.db.models import Avg
+from django.contrib.auth.models import User
+
+from notes.models import ClientNote
+from main.utils import max_mind_request
+from main.models import AESField
+from hal.models import Hal
+from lib.accounting.banks.iban import iban_validator
+from lib.accounting.banks.iban import swift_validator
+from lib.accounting.banks.iban import swift_is_valid as bic_is_valid
+from lib.accounting.banks.iban import is_valid as iban_is_valid
+from lib.accounting.banks.sepa import SEPA_CORE
+from lib.accounting.banks.sepa import SEPA_B2B
+from lib.accounting.banks.sepa import SEPA_SEQ_TYPE
+from kayako.utils import update_kayako_user_group
+from kayako.utils import get_kayako_group_id_in_kayako
+from .utils import karma_is_full
+
+
+class ClientManager(models.Manager):
+    def clients_join_values(self):
+        cursor = connection.cursor()
+        cursor.execute("SELECT c.id, v.value FROM hb_client_access AS c JOIN hb_client_fields_values AS v WHERE v.client_id=c.id")
+        objects = cursor.fetchall()
+        return objects
+
+class ClientGroup(models.Model):
+    id = models.IntegerField(primary_key=True)
+    name = models.CharField(max_length=127L)
+    description = models.TextField()
+    color = models.CharField(max_length=7L)
+    discount = models.DecimalField(max_digits=12, decimal_places=2)
+    scenario_id = models.IntegerField()   # <---------- PENDING
+    default_priority = models.IntegerField()
+    class Meta:
+        db_table = 'hb_client_group'
+        permissions = (("export_clientgroup", "Can export"),)
+
+
+class Client(models.Model):
+    STATUS = (('Active', 'Active'), ('Inactive', 'Inactive'), ('Closed', 'Closed'), ('Pending', 'Pending'))
+    group = models.ForeignKey(ClientGroup, db_column='group_id')
+    email = models.EmailField()
+    password = models.CharField(max_length=40)
+    lastlogin = models.DateTimeField()
+    ip = models.IPAddressField()
+    host = models.CharField(max_length=100)
+    status = models.CharField(max_length=40, choices=STATUS)
+    objects = ClientManager()
+
+    class Meta:
+        db_table = 'hb_client_access'
+        permissions = (("export_client", "Can export"),)
+
+    def __unicode__(self):
+        return unicode(self.email)
+
+    def karma(self):
+        return self.clientextradetail.karma
+    karma.admin_order_field = 'clientextradetail__karma'
+
+    def is_dni_fraud(self):
+        try:
+            is_fraud = not self.fraud_set.filter(type='Dni')[0].check_result
+            if is_fraud:
+                return 'True'
+            else:
+                return 'False'
+        except:
+            return 'Unknown'
+
+    def is_maxmind_fraud(self):
+        try:
+            is_fraud = self.fraud_set.filter(type='Maxmind').order_by('-date_added')[0].check_result
+            if is_fraud:
+                return 'True'
+            else:
+                return 'False'
+        except:
+            return 'Unknown'
+
+    def get_company(self):
+        field_id = 18
+
+        cursor = connection.cursor()
+        cursor.execute('SELECT value FROM hb_client_fields_values where field_id = %d and client_id = %d LIMIT 1' %( field_id, self.id ))
+        val = cursor.fetchone()
+        if val:
+            return val[0]
+        else:
+            return 'Private'
+
+    @property
+    def companyname(self):
+        try:
+            return smart_str(self.clientfieldvalue_set.get(field_id__code='my-company').value)
+        except:
+            return u''
+
+    def doc_number(self):
+        if self.clientdetail.company:
+            field_id = 17
+        else:
+            field_id = 20
+
+        cursor = connection.cursor()
+        cursor.execute('SELECT value FROM hb_client_fields_values WHERE field_id = %d AND client_id = %d LIMIT 1' %( field_id, self.id ))
+        val = cursor.fetchone()
+        if val:
+            return val[0]
+        else:
+            return None
+
+    def tax_exemp(self):
+        field_id = 24
+
+        cursor = connection.cursor()
+        cursor.execute('SELECT value FROM hb_client_fields_values WHERE field_id = %d AND client_id = %d LIMIT 1' %( field_id, self.id ))
+        val = cursor.fetchone()
+
+        if val:
+            if val[0]:
+                return "SI"
+
+        return ""
+
+    def get_card_number(self):
+        file = open(os.path.join(os.path.dirname(__file__), 'cc.txt').replace('\\', '/'), 'r')
+        hash1 = file.read()
+        cc_hash = hash1.replace("\n", "")
+
+        cursor = connection.cursor()
+        cursor.execute(" SELECT AES_DECRYPT( cardnum,  '" + cc_hash + "' ) AS cardnum, AES_DECRYPT( expdate,  '" + cc_hash + "' )\
+                         AS expdate\
+                         FROM hb_client_billing where client_id = '" + str(self.id) + "'")
+
+        return cursor.fetchone()
+
+    def get_fraud_data(self, cardnum=None, ip=None):
+        out = dict()
+
+        if ip:
+            ip_field = ip
+        else:
+            ip_field = self.ip
+
+        if cardnum:
+            cardnum_field = cardnum
+        else:
+            cardnum_field = self.get_card_number()
+
+        out["license_key"] = "te73UGFrU2yH"
+        out["i"] = ip_field
+        out["city"] = self.clientdetail.city
+        out["region"] = self.clientdetail.state
+        out["postal"] = self.clientdetail.postcode
+        out["country"] = self.clientdetail.country
+        # Recommended fields
+        out["domain"] = self.email.split("@")[1]
+        out["bin"] = cardnum_field[0:6]
+        out["requested_type"] = "premium"
+        out["shipAddr"] = self.clientdetail.address1
+        out["shipCity"] = self.clientdetail.city
+        out["shipRegion"] = self.clientdetail.state
+        out["shipPostal"] = self.clientdetail.postcode
+        out["shipCountry"] = self.clientdetail.country
+
+        return max_mind_request(out)
+
+    def phone(self):
+        return self.clientdetail.phonenumber
+
+    def fullname(self):
+        #return " ".join([self.clientdetail.firstname, self.clientdetail.lastname])
+        return "%s %s" % (smart_str(self.clientdetail.firstname), smart_str(self.clientdetail.lastname))
+
+    def country(self):
+        return self.clientdetail.country
+
+    def notes(self):
+        return ''.join([c.note for c in ClientNote.objects.filter(rel_id=self.id).order_by('date')])
+
+    def credit(self):
+        try:
+            credit = self.clientbilling_set.all()[0].credit
+        except IndexError:
+            credit = 0
+        return credit
+
+    '''
+    def vip_status(self):
+        try:
+            status = "<strong>%s</strong>" % self.clientvip.status
+        except:
+            status = False
+
+        return status
+    vip_status.allow_tags = True
+    '''
+
+    def extratypes(self):
+        extratype_string = ""
+
+        try:
+            extratypes = self.clientextradetail.extratype.all()
+        except ClientExtraDetail.DoesNotExist:
+            pass
+        else:
+            if len(extratypes) > 0:
+                extratype_string = " | ".join([extratype.extratype for extratype in extratypes])
+
+        return extratype_string
+
+    def get_clouds(self, cloud_type="Cloud Datacenter"):
+        accounts = self.account_set.all()
+        accounts = [acc for acc in accounts if acc.product_id.category_id.name == cloud_type]
+
+        return accounts
+
+    def get_vms(self, account=None):
+        if account:
+            auth = (account.username, account.password)
+        else:
+            auth = ()
+        vms = Hal.objects.all()[0].get_data('vm', 'vm', 'list', auth=auth)
+
+        return vms
+
+    def get_biggest_account(self):
+        accs = self.account_set.all()
+        biggest_account = None
+        product_aux = 0
+
+        for acc in accs:
+            if acc.product_id.category_id.name.lower() == 'cloud datacenter':
+                try:
+                    ram = int(acc.product_id.description.split(" | ")[0].replace(" GB", ""))
+                except ValueError:
+                    ram = 0
+                if product_aux < ram and acc.status == 'Active':
+                    product_aux = ram
+                    biggest_account = acc
+
+        return biggest_account
+
+    def datecreated(self):
+        return self.clientdetail.datecreated
+    datecreated.admin_order_field = 'clientdetail__datecreated'
+
+    def get_client_support_notes(self):
+        notas = ', '.join(
+                [c.content for c in self.clientsupportnote_set.all()])
+        return "%s" % notas
+
+    def url_add_client_support_notes(self):
+        #change_url = urlresolvers.reverse('admin:clients_clientsupportnote_add', kwargs={'client_id': self.id,})
+        change_url = urlresolvers.reverse('admin:clients_clientsupportnote_add')
+        return '<a href="%s?client=%s">Nueva</a>' % (change_url, self.id)
+    url_add_client_support_notes.allow_tags = True
+
+    @property
+    def twitter(self):
+        tw = ''
+        try:
+            tw = smart_str(self.clientfieldvalue_set.get(field_id__code='twitter').value)
+        except:
+            pass
+        return tw
+
+    def twitter_link(self):
+        link = ''
+        tw = self.twitter
+        if tw:
+            link = "<a target='_blank' href='http://www.twitter.com/{twitter}'>@{twitter}".format(
+                twitter=tw,
+                )
+        return link
+    twitter_link.allow_tags = True
+
+
+    def income(self):
+
+        invoice = get_model('invoices', 'Invoice')
+        income = invoice.objects.filter(status='Paid', client_id=self.id).aggregate(total=Avg('total'))
+        return round(income.values()[0], 2) if income.values()[0] is not None else 0
+
+
+    def currency(self, field=None):
+
+        currency = get_model('invoices', 'Currency')
+        try:
+            return currency.objects.get(pk=self.clientbilling_set.get().currency_id).iso
+        except (ClientBilling.DoesNotExist, currency.DoesNotExist):
+            return ''
+
+    def parent_link(self):
+        change_url = urlresolvers.reverse('admin:clients_client_change', args=(self.clientdetail.parent_id.id_id,))
+        return '<a href="%s">%s</a>' % (change_url, self.clientdetail.parent_id.id)
+    parent_link.allow_tags = True
+
+    def parent_id(self):
+        return self.clientdetail.parent_id.id
+
+
+class ClientDetail(models.Model):
+    COMPANY = ((1, 'Company'), (0, 'Private'))
+
+    id = models.OneToOneField(Client, primary_key=True, db_column='id')
+    parent_id = models.ForeignKey('self', blank=True, null=True, db_column='parent_id')
+    firstname = models.CharField(max_length=100)
+    lastname = models.CharField(max_length=100)
+    companyname = models.CharField(max_length=100)
+    address1 = models.CharField(max_length=250)
+    address2 = models.CharField(max_length=250)
+    city = models.CharField(max_length=250)
+    state = models.CharField(max_length=250)
+    postcode = models.CharField(max_length=10)
+    country = models.CharField(max_length=250)
+    phonenumber = models.CharField(max_length=20)
+    datecreated = models.DateField()
+    #notes = models.CharField(max_length=250)  <--- moved to hb_notes in hostbill upgrade. now is calculated in self.notes()
+    language = models.CharField(max_length=250)
+    company = models.IntegerField(max_length=1, choices=COMPANY)
+
+    class Meta:
+        db_table = 'hb_client_details'
+        permissions = (("export_clientdetail", "Can export"),)
+
+    def __unicode__(self):
+        return unicode(self.firstname+" "+self.lastname)
+
+    def notes(self):
+        return ''.join([c.note for c in ClientNote.objects.filter(rel_id=self.id.id).order_by('date')])
+
+    def get_doc_no(self):
+        if self.company:
+            field_id = 17
+        else:
+            field_id = 20
+
+        cursor = connection.cursor()
+        cursor.execute('SELECT value FROM hb_client_fields_values WHERE field_id = %d AND client_id = %d LIMIT 1' %( field_id, self.id.id ))
+        val = cursor.fetchone()[0]
+
+        return val
+
+    def is_gigas(self):
+        return self.id.email[-10:] == '@gigas.com'
+
+    def privileges(self):
+        p = loads(self.id.clientprivileges)
+        privileges = ''
+        try:
+            for i in p['services']:
+                privileges += '<b>Account id {0}:</b><br>'.format(i)
+                for action in p['services'][i]:
+                    privileges += ' {0},'.format(action)
+                privileges += '<br><br>'
+        except KeyError:
+            privileges += 'No privileges<br><br>'
+
+        return privileges
+    privileges.allow_tags = True
+
+    def parent(self):
+        change_url = urlresolvers.reverse('admin:clients_client_change', args=(self.parent_id.id_id,))
+        return '<a href="%s">%s</a>' % (change_url, self.parent_id.id)
+    parent.allow_tags = True
+
+class ClientField(models.Model):
+    FIELD_TYPES = (('Select', 'Select'), ('Check', 'Check'), ('Input', 'Input'), ('Password', 'Password'))
+    TYPES = (('Company', 'Company'), ('Private', 'Private'), ('All', 'All'))
+    code = models.CharField(max_length = 32)
+    name = models.CharField(max_length = 32)
+    field_type = models.CharField(max_length = 30, choices = FIELD_TYPES)
+    default_value = models.CharField(max_length = 250)
+    type_field = models.CharField(max_length = 50, db_column = 'type', choices = TYPES)
+    options = models.IntegerField(max_length = 5)
+    description = models.CharField(max_length = 250)
+    sort_order = models.IntegerField(max_length = 11)
+    expression = models.CharField(max_length = 70)
+
+    class Meta:
+        db_table = 'hb_client_fields'
+        permissions = (("export_clientfleild", "Can export"),)
+
+    def __unicode__(self):
+        return unicode(self.code+" "+self.name)
+
+
+class ClientFieldValue(models.Model):
+    client_id = models.ForeignKey(Client, db_column = 'client_id', primary_key=True)
+    field_id = models.ForeignKey(ClientField, db_column = 'field_id', primary_key=True)
+    value = models.CharField(max_length = 250)
+
+    class Meta:
+        db_table = 'hb_client_fields_values'
+        unique_together = ("client_id", "field_id")
+        permissions = (("export_clientfieldvalue", "Can export"),)
+
+    def __unicode__(self):
+        return unicode(self.client_id)
+
+
+
+class ClientBilling(models.Model):
+    CARDTYPES = (('Visa','Visa'), ('MasterCard', 'MasterCard'),
+            ('Discover', 'Discover'), ('American', 'American'),
+            ('Express', 'Express'), ('Laser', 'Laser'),
+            ('Maestro', 'Maestro'))
+    client = models.ForeignKey(Client, db_column='client_id')
+    credit = models.DecimalField(max_digits=10, decimal_places=2)
+    taxexempt = models.IntegerField(max_length=1)
+    latefeeoveride = models.IntegerField(max_length=1)
+    overideduenotices = models.IntegerField(max_length=1)
+    cardtype = models.CharField(max_length=20, choices=CARDTYPES)
+    cardnum = models.TextField()
+    expdate = models.TextField()
+    currency_id = models.IntegerField(max_length=11)
+    token = models.TextField()
+    token_gateway_id = models.IntegerField()
+
+    class Meta:
+        db_table = 'hb_client_billing'
+        permissions = (("export_clientbilling", "Can export"),)
+
+    def __unicode__(self):
+        return unicode(self.client)
+
+
+class ClientExtraType(models.Model):
+    extratype = models.CharField(max_length=100,  null=True, blank=True)
+
+    class Meta:
+        db_table = 'gigas_client_extratype'
+        permissions = (("export_clientextratype", "Can export"),)
+
+    def __unicode__(self):
+        return unicode(self.extratype)
+
+class ClientExtraDetail(models.Model):
+    TIMEZONE_CHOICES = tuple([(i, "GMT%+d" % i) for i in range(-12,15)])
+
+    client = models.ForeignKey(Client, db_column='client_id', primary_key=True)
+    #client = models.OneToOneField(Client, db_column='client_id', null=True, blank=True)
+    karma = models.IntegerField(max_length=11, default=0) # este campo ya no debe usarse DEPRECATED
+    kayako_id = models.IntegerField(max_length=11, null=True, blank=True)
+    timezone = models.IntegerField(max_length=1, choices=TIMEZONE_CHOICES, default=0) 
+    trusted_payer = models.BooleanField(default=False)
+    extratype = models.ManyToManyField(ClientExtraType, null=True, blank=True)
+    adyen_expiry_date = models.DateField(null=True, blank=True)
+
+    def has_adhoc(self):
+        """ tiene un karma puesto manualmente? """
+        return self.karma in [3, 5]
+    has_adhoc.boolean = True
+    has_adhoc.admin_order_field = 'karma'
+
+    class Meta:
+        db_table = 'gigas_client_extradetails'
+        permissions = (("export_clientextradetail", "Can export"),)
+
+    def __unicode__(self):
+        return unicode(self.client)
+
+    def save(self, *args, **kwargs):
+        """ override this to synch kayako with self.karma """
+        filterwarnings('ignore', category=Database.Warning)
+        try:
+            orig = ClientExtraDetail.objects.get(pk=self.id)
+        except ClientExtraDetail.DoesNotExist:
+            pass
+        else:
+            if orig.karma != self.karma: # karma has changed ?
+                if (self.client.clientdetail.parent_id_id or 
+                    not karma_is_full(self.karma)):
+                    new_group_id = get_kayako_group_id_in_kayako(self.karma)
+                    _ = update_kayako_user_group(self.client, new_group_id)
+                else:
+                    self.karma = orig.karma
+                    logging.info("karma was not saved probably "
+                                  "because karma group is full")
+        super(ClientExtraDetail, self).save(*args, **kwargs)
+
+
+class ClientBillingExtra(models.Model):
+    DIRECTDEBIT_CHOICES = ((0, 'Manual'), (1, 'Auto'))
+    SEPA_CHOICES = ((SEPA_CORE, SEPA_CORE), (SEPA_B2B, SEPA_B2B))
+    SEPA_CHOICES_DEFAULT = SEPA_CORE
+    SEPA_SEQ_TYPE_CHOICES = tuple(zip(SEPA_SEQ_TYPE.values(), SEPA_SEQ_TYPE.keys()))
+
+    client = models.OneToOneField(Client, db_column='client_id', related_name='billing_extra', verbose_name='client id')
+    direct_debit = models.IntegerField(max_length=1, choices=DIRECTDEBIT_CHOICES, default=0, verbose_name='Provision')
+    ccc = AESField(max_length=100, default=None, blank=False, null=True, verbose_name='IBAN', validators=[iban_validator])
+    bic = models.CharField(max_length=100, null=True, blank=False, verbose_name='SWIFT/BIC', validators=[swift_validator])
+    sepa = models.CharField(max_length=100, null=True, blank=True, choices=SEPA_CHOICES, default=SEPA_CHOICES_DEFAULT)
+    mandate = models.CharField(max_length=100, null=True, blank=True)
+    mandate_date = models.DateField(blank=True, null=True, default=datetime.date(2009,10,31))
+    mandate_sequence_type = models.CharField(max_length=100, null=True, blank=True, choices=SEPA_SEQ_TYPE_CHOICES)
+
+    class Meta:
+        db_table = 'gigas_client_billing_extra'
+        permissions = (("export_clientbillingextra", "Can export"),)
+
+    def __unicode__(self):
+        return unicode(self.client)
+
+    def save(self, *args, **kwargs):
+        filterwarnings('ignore', category=Database.Warning)
+        if self.pk is not None:
+            orig = ClientBillingExtra.objects.get(pk=self.pk)
+            if orig.mandate != self.mandate:
+                self.mandate_sequence_type = SEPA_SEQ_TYPE['first']
+        super(ClientBillingExtra, self).save(*args, **kwargs) # Call the "real" save() method.
+
+    def client_email_link(self):
+        change_url = urlresolvers.reverse('admin:clients_client_change', args=(self.client.id,))
+        return '<a href="%s">%s</a>' % (change_url, self.client.email)
+    client_email_link.allow_tags = True
+
+    def client_id_link(self):
+        change_url = urlresolvers.reverse('admin:clients_client_change', args=(self.client.id,))
+        return '<a href="%s">%s</a>' % (change_url, self.client.id)
+    client_id_link.allow_tags = True
+
+    def iban_is_valid(self):
+        return iban_is_valid(self.ccc)
+
+    def bic_is_valid(self):
+        return bic_is_valid(self.bic)
+
+
+class ClientSupportNote(models.Model):
+    client = models.ForeignKey(Client, db_column='client_id')
+    TYPES = (('Calidad', 'Calidad'),)
+    type = models.CharField(max_length=50, choices=TYPES, default='Calidad')
+    content = models.CharField(max_length=255)
+
+    class Meta:
+        db_table = 'gigas_client_support_notes'
+        permissions = (("export_clientsupportnote", "Can export"),)
+
+    def __unicode__(self):
+        return unicode(self.type)
+
+    def client_link(self):
+       change_url = urlresolvers.reverse('admin:clients_client_change', args=(self.client.id,))
+       return '<a href="%s">%s</a>' % (change_url, self.client.email)
+    client_link.allow_tags = True
+
+    def edit_link(self):
+        change_url = urlresolvers.reverse('admin:clients_clientsupportnote_change', args=(self.id,))
+        return '<a href="%s">Editar</a>' % (change_url)
+    edit_link.allow_tags = True
+
+
+class ClientMigration(models.Model):
+    name = models.CharField(max_length=255)
+    client = models.ForeignKey(Client, db_column='client_id')
+    contact_email = models.EmailField()
+    date_start = models.DateTimeField()
+    date_end = models.DateTimeField(blank=True, null=True)
+    notes = models.TextField()
+
+    class Meta:
+        db_table = 'gigas_client_migrations'
+        permissions = (("export_clientmigration", "Can export"),)
+
+    def __unicode__(self):
+        return unicode(self.name)
+
+    def client_link(self):
+        change_url = urlresolvers.reverse('admin:clients_client_change', args=(self.client.id,))
+        return '<a href="%s">%s</a>' % (change_url, self.client.id)
+    client_link.allow_tags = True
+
+    def client_email_link(self):
+        change_url = urlresolvers.reverse('admin:clients_client_change', args=(self.client.id,))
+        return '<a href="%s">%s</a>' % (change_url, self.client.email)
+    client_email_link.allow_tags = True
+
+
+class ClientPrivileges(models.Model):
+    client = models.OneToOneField(Client, db_column='client_id', primary_key=True)
+    privileges = models.TextField()
+
+    class Meta:
+        db_table = 'hb_client_privileges'
+        permissions = (("export_clientprivileges", "Can export"),)
+
+    def __unicode__(self):
+        return unicode(self.privileges)
+
+

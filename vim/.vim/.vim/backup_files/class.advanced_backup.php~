@@ -1,0 +1,148 @@
+<?php
+
+
+class GIGAS_AdvancedBackupModel
+{
+    public function __construct($id=null)
+    {
+        if (empty($id)) {
+            throw new Exception('Parameter <id> is required');
+        }
+
+        $this->db = Engine::singleton()->getObject("db");
+        $this->account_id = $id;
+        $this->config = $this->get_config();
+    }
+
+    public function get_config()
+    {
+        $q = $this->db->prepare("SELECT * FROM gigas_backup_advanced WHERE account_id = ?");
+        $q->execute(array($this->account_id));
+        $backup_config = $q->fetch(PDO::FETCH_ASSOC);
+        $q->closeCursor();
+
+        return $backup_config;
+    }
+
+
+    public function set_config($params, $manager_url='')
+    {
+        $q = $this->db->prepare("INSERT INTO gigas_backup_advanced (account_id, dc_account_id, vlan_account_id, password, manager_url)  VALUES (?, ?, ?, ?, ?)");
+        try {
+            $q->execute(array($this->account_id, $params['dc_account_id'], $params['vlan_account_id'], $params['password'], $manager_url));
+        } catch (Exception $e) {
+            hbm_log_error("sorpresa");
+            var_dump($this->account_id);
+            var_dump($params);
+            var_dump($manager_url);
+            var_dump($e);
+            die("asdd");
+        }
+
+        if($q->rowCount() == 0)
+        {
+            return array();
+        }
+
+        $q->closeCursor();
+
+        $config = array(
+            "account_id" => $this->account_id,
+            "dc_account_id" => $params['dc_account_id'],
+            "vlan_account_id" => $params['vlan_account_id'],
+            "password" => $params['password'],
+            "manager_url" => $manager_url,
+        );
+
+        $this->config = $config;
+
+        return $config;
+    }
+
+    public function set_size($size)
+    {
+        #modificamos el tamaño de backup avanzado en base de datos
+        $q = $this->db->prepare("UPDATE gigas_backup_advanced SET size = ? WHERE account_id = ?");
+        $q->execute(array($size, $this->account_id));
+        $q->closeCursor();
+        $this->config['size'] = $size;
+
+        return true;
+    }
+
+    public function set_manager_url($manager_url)
+    {
+        $q = $this->db->prepare("UPDATE gigas_backup_advanced SET manager_url = ? WHERE account_id = ?");
+        $q->execute(array($manager_url, $this->account_id));
+        $q->closeCursor();
+        $this->config['manager_url'] = $manager_url;
+
+        return true;
+    }
+
+    public function get_sizes()
+    {
+        $hapi = new GApiWrapper();
+        $size = intval($this->config['size']);
+        $addons_size = $hapi->getAddonsSumByModule(array('account_id' => $this->config['dc_account_id'], 'module' => 'class.gigashosting_backupspace.php', 'option' => 'size', 'status' => 'Active'));
+        $account = $hapi->getAccountDetails(array('id'=>$this->config['dc_account_id']));
+        $user_api = new GigasApi($account['details']);
+        $backups = $user_api->get('/backups', array());
+        $sum = 0;
+        foreach ($backups as $value) {
+            $value = json_decode($value, true);
+            foreach ($value as $bk) {
+                $sum += $bk['backup_size'];
+            }
+        }
+        $used = $sum / 1024 / 1024;
+        $used = round($used, 2);
+        $product_backup_size = intval($account['details']['options']['option17']);
+        $total_size = $product_backup_size + $addons_size;
+
+        $backup_sizes = array(
+            'total' => $total_size - $used,
+            'bck_size' => $size,
+            'dc_size' => $total_size - $used - $size,
+        );
+
+        return $backup_sizes;
+    }
+
+    public function set_password_reset($reset_password=0)
+    {
+        $q = $this->db->prepare("UPDATE gigas_backup_advanced SET reset_password = ? WHERE account_id = ?");
+        $q->execute(array($reset_password, $this->account_id));
+        $q->closeCursor();
+    }
+
+    public function mark_reset_password()
+    {
+        $this->set_password_reset(1);
+    }
+
+    public function get_config_by_dc_account($dc_account_id)
+    {
+        $q = $this->db->prepare("SELECT * FROM gigas_backup_advanced WHERE dc_account_id = ? ORDER BY id DESC LIMIT 1");
+        $q->execute(array($dc_account_id));
+        $backup_config = $q->fetch(PDO::FETCH_ASSOC);
+        $q->closeCursor();
+        return $backup_config;
+    }
+
+    public function del_config()
+    {
+        $q = $this->db->prepare('DELETE FROM gigas_backup_advanced WHERE account_id = ?');
+        $q->execute(array($this->account_id));
+        $q->closeCursor();
+    }
+
+    public function get_dc_accounts()
+    {
+        $q = $this->db->prepare("SELECT dc_account_id FROM gigas_backup_advanced");
+        $q->execute(array($this->account_id));
+        $dc_ids = $q->fetchAll(PDO::FETCH_ASSOC);
+        $q->closeCursor();
+        return array_map(function($v) { return $v['dc_account_id']; }, $dc_ids);
+    }
+}

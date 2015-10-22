@@ -1,0 +1,468 @@
+$(document).ready(function() { 
+    $('#logout').click(function() {
+        $.ajax({
+            url: window.location.origin + "/support/Base/User/Logout",
+        });
+    });
+});
+
+function addMessage(msg, type)
+{
+    if($('select[name=languagechange]').length > 0)
+    {
+        var lang = $('select[name=languagechange]').val();
+    }
+    else
+    {
+        var lang = $('ul.fix-idioma a.activemode').data('language');
+    }
+    var lang_msg = msg.split("|");
+    var index = 0;
+
+    if(lang_msg.length > 1)
+    {
+        switch(lang)
+        {
+            case "English":
+                index = 0;
+                break;
+            case "Spanish":
+                index = 1;
+                break;
+        }
+    }
+
+    if($('.notifier-pas.np-' + (type == 'info' ? "ok" : "error")).length == 0)
+    {
+        var notifier = $("<section>").attr("id", "hideme "+ type)
+                                     .addClass("notifier-pas np-" + (type == 'info' ? "ok" : "error"))
+                                     .append($("<a>").attr("href", "#hideme").addClass("hide").text("X"))
+                                     .append($("<p>").text(lang_msg[index]));
+
+        $(".hide").live('click', function()
+        {
+             $(".notifier-pas").remove();
+        });
+
+        //$(".notifier-pas").remove();
+
+        notifier.insertBefore($("#thestuff"));
+    }
+    else
+    {
+        var notifier = $('.notifier-pas.np-' + (type == "info" ? "ok" : "error"));
+
+        notifier.find('p').append($("<span>").text(lang_msg[index]));
+        if(! notifier.is(":visible"))
+        {
+            notifier.show();
+        }
+    }
+
+    $("body").animate({scrollTop: $("[id^=hideme]").offset().top}, 500);
+}
+
+function setText(tag)
+{
+    if($('select[name=languagechange]').length > 0)
+    {
+        var lang = $('select[name=languagechange]').val().toLowerCase();
+    }
+    else
+    {
+        var lang = $('[class^=fix-idioma] a.active').text().toLowerCase();
+    }
+    var actual = tag.html();
+
+    if(actual && actual.indexOf("|") != -1)
+    {
+        switch(lang)
+        {
+            case "english":
+                tag.html(actual.split('|')[0]);
+                break;
+            case "spanish":
+                tag.html(actual.split('|')[1]);
+                break;
+        }
+    }
+}
+
+function splitMsg(tag)
+{
+    //System notifications
+    if (tag == undefined)
+    {
+        vals = $('.notifier-pas p span');
+
+        vals.each(function()
+        {
+            setText($(this));
+        });
+    }
+    else
+    {
+        setText(tag);
+    }
+}
+
+function destroy(type)
+{
+    $('[id="hideme ' + type + '"]').remove();
+}
+
+function destroyMessage(type)
+{
+    if(typeof type === 'undefined') type = '';
+    $('[id^="hideme ' + type + '"] p').remove();
+    $('[id^="hideme ' + type + '"]').append('<p></p>').hide();
+}
+
+function ajax_update_gigas(a,b,c,d,id,loadmsg)
+{
+    var contenido = $(c).html()
+    d&&$(c).html(contenido+'<tr id="loadingpng'+id+'"><td>'+ loadmsg +'</td><td><center><img src="ajax-loading.gif" /></center></td></tr>'),b!=undefined&&isEmpty(b)&&(b={empty1m:"param"}),$.post(a,b,function(a)
+        {
+        var b=parse_response(a);
+        if(!b)
+            {
+            $('#loadingpng'+id).html('<td>Falló la comprobación del tld</td><td></td>');
+            return
+            }
+        //console.log("result: " + b);
+        $('#loadingpng'+id).html(b);
+        //contenido = $(c).html()
+        //$(c).html(contenido + b),
+        fixHeights()
+        })
+}
+
+function hastld(domain){
+    var ld = domain.split('.');
+    var res = "";
+    if (ld.length == 2)
+        res = ld[1];
+    else if (ld.length == 3)
+        res = ld[1] + "." + ld[2];
+    return res;
+}
+
+function mi_filtro(lista){
+    var res = [];
+    for (var i = 0; i < lista.length; i++){
+        if (lista[i] != "")
+            res.push(lista[i]);
+    }
+    return res;
+
+}
+
+function check_domain_gigas(form,updater) {
+    $(updater).empty();
+
+    var sldarea = $(form).find('textarea').val();
+    if (sldarea !== "")
+    {
+        //listamos los tlds (vienen de la bb.dd)
+        var tlds = [];
+        var slds = [];
+        var i = 0;
+        $(form).find('input.tld_register:checked').each(function (){
+            tlds[i++] = $(this).val();
+        });
+
+        // el estupido ie8 es estupido y requiere ciertas medidas
+        if (sldarea.match(/[\s,\n]/) !== null)
+        {
+            var unfiltered = sldarea.split(/[\s,\n]/);
+            slds = mi_filtro(unfiltered);
+        }
+        else
+        {
+            slds = [sldarea];
+        }
+
+        i = 0;
+        for (var sldi in slds)
+        {
+            var sld = slds[sldi];
+            var also = hastld(sld); //contiene tlds en el dominio?
+            if (also !== "")
+            {
+                sld = sld.split('.')[0];
+                if ($.inArray("." + also, tlds)==-1)
+                {
+                    ajax_update_gigas('index.php?cmd=checkdomain',
+                                      {
+                                          layer: 'ajax',
+                                          //singlecheck: true,
+                                          action:'checkdomain',
+                                          tld: also,
+                                          sld: sld
+                                      },
+                                      updater,
+                                      true,
+                                      i++,
+                                      "Comprobando " + also + " para " + sld);
+                }
+            }
+            for (var tldi in tlds)
+            {
+                var tld=tlds[tldi];
+                ajax_update_gigas('index.php?cmd=checkdomain',
+                                  {
+                                      layer:'ajax',
+                                      action:'checkdomain',
+                                      tld: tld,
+                                      sld: sld
+                                  },
+                                  updater,
+                                  true,
+                                  i++,
+                                  "Comprobando " + tld + " para " + sld);
+            }
+        }
+
+        $('#updater').show();
+    }
+    return false;
+}
+
+function check_domain_transfer(form,updater){
+  //mantenemos la funcionalidad del transfer
+  var tld = form["tld"].value;
+  var sld = form["sld"].value;
+  ajax_update('index.php?cmd=checkdomain&' + $(form).serialize(),{layer:'ajax'},updater,true);
+/*
+ * index.php?cmd=checkdomain&transfer=&singlecheck=1&action=checkdomain&domain_cat=22&sld=sudominio&tld=.com
+ * index.php?cmd=checkdomain&transfer=&singlecheck=1&action=checkdomain&domain_cat=22&sld=sudominio&tld=.com&security_token=60cfdd0350cf5be431629cc87d3baecb
+ * index.php?cmd=checkdomaintransfer=&singlecheck=1&action=checkdomain&sld=sudominio&tld=.com
+ */
+  $(updater).show();
+  return false;
+}
+
+function check_nif(nif){
+    var valido = true;
+    var array_control = ['T', 'R', 'W', 'A', 'G', 'M', 'Y', 'F', 'P', 'D', 'X', 'B', 'N', 'J', 'Z', 'S', 'Q', 'V', 'H', 'L', 'C', 'K', 'E'];
+    //valido = valido && nif.length == 9;
+    valido = valido && nif.length > 1 && nif.length < 10;  //al menos 1 num y 1 letra, no?
+    var entero = parseInt(nif.substring(0,nif.length - 1 ), 10);
+    var comp = nif[nif.length - 1];
+    // el resto del numero al dividirlo por 23 debe dar el digito en el array de control
+    return valido && (!isNaN(entero)) && array_control[entero%23] == comp.toUpperCase();
+}
+
+function check_nie(nie){
+    //convertimos a nif y pasamos por check_nif
+    if (nie.length == 9)
+    {
+        if (nie[0].toUpperCase() == 'X')
+            var nif = "0" + nie.substring(1,nie.length);
+        else if (nie[0].toUpperCase() == 'Y')
+            var nif = "1" + nie.substring(1,nie.length);
+        else if (nie[0].toUpperCase() == 'Z') //a futuro
+            var nif = "2" + nie.substring(1,nie.length);
+        else
+            return false;
+        return check_nif(nif);
+    }
+    return false;
+}
+
+function check_cif(cif){
+    // sacado de la parte de actionscript de http://es.wikipedia.org/wiki/C%C3%B3digo_de_identificaci%C3%B3n_fiscal
+    var par = 0;
+    var non = 0;
+    var letras = "ABCDEFGHJKLMNPRQSUVW";
+    var caracterControlLetra = "KPQS";
+    var caracterControlNum = "ABEH";
+    var i;
+    var parcial;
+    var control;
+    var controlLetra = "JABCDEFGHIJ";
+    var letraIni = cif.charAt(0);
+
+    if (cif.length!=9) {
+        //app.alert("El Cif debe tener 9 dígitos",3);
+        return false;
+    }
+    else
+    {
+        if (letras.indexOf(letraIni.toUpperCase())==-1)
+        {
+            //app.alert("La letra del CIF introducido no es correcta",3);
+            return false;
+        }
+        for (i=2;i<8;i+=2) {
+            par = par + parseInt(cif.charAt(i));
+        }
+
+        for (i=1;i<9;i+=2) {
+            var nn = 2 * parseInt(cif.charAt(i));
+            if (nn > 9) nn = 1 + (nn-10);
+            non = non + nn;
+        }
+
+        parcial = par + non;
+
+        control = (10 - ( parcial % 10));
+
+
+        if (caracterControlLetra.indexOf(letraIni.toUpperCase()) != -1)
+        {
+            // El carácter de control deberá ser una letra
+
+            if (controlLetra.charAt(control) != cif.charAt(8).toUpperCase())
+            {
+                //app.alert("El Cif no es válido",3);
+                return false;
+            }
+        }
+        if (caracterControlNum.indexOf(letraIni.toUpperCase()) != -1)
+        {
+            // El carácter de control deberá ser un número
+
+            if (control == 10) control = 0;
+
+            if (control != cif.charAt(8))
+            {
+                //app.alert("El Cif no es válido",3);
+                return false;
+            }
+        }
+        if ((caracterControlLetra.indexOf(letraIni.toUpperCase()) == -1) && (caracterControlNum.indexOf(letraIni.toUpperCase()) == -1))
+        {
+            // En este caso el carácter de control puede ser una letra o un número
+
+            if (control == 10)
+            {
+                control = 0;
+            }
+            if ((controlLetra.charAt(control) != cif.charAt(8).toUpperCase()) && (control != cif.charAt(8)))
+            {
+                //app.alert("El Cif no es válido",3);
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+function isVpsLocked(service, vpsid)
+{
+    var islocked = false;
+
+    $.ajax({
+            url: '?cmd=clientarea&action=services&service=' + service + '&vpsid=' + vpsid + '&vpsdo=vmdetails&json=true',
+            type: 'GET',
+            async: false,
+            success: function(data)
+            {
+                var vmdetails = JSON.parse(data.replace(/^.*\-\->[ \n\t]+/g, ''));
+                islocked = (vmdetails != null && vmdetails != false && vmdetails.status != 'unbuilt' && vmdetails.locked == 1);
+            }
+    });
+
+    return islocked;
+}
+
+function isVpsOnline(service, vpsid)
+{
+    var isonline = false;
+
+    $.ajax({
+            url: '?cmd=clientarea&action=services&service=' + service + '&vpsid=' + vpsid + '&vpsdo=vmdetails&json=true',
+            type: 'GET',
+            async: false,
+            success: function(data)
+            {
+                var vmdetails = JSON.parse(data.replace(/^.*\-\->[ \n\t]+/g, ''));
+                isonline = (vmdetails != null && vmdetails != false && vmdetails.status == 'online' && vmdetails.locked == 0);
+            }
+    });
+
+    return isonline;
+}
+
+function isVpsOnlineAsync(service, vpsid, online_fn, offline_fn)
+{
+    $.ajax({
+            url: '?cmd=clientarea&action=services&service=' + service + '&vpsid=' + vpsid + '&vpsdo=vmdetails&json=true',
+            type: 'GET',
+            success: function(data)
+            {
+                var vmdetails = JSON.parse(data.replace(/^.*\-\->[ \n\t]+/g, ''));
+                var is_online = (vmdetails != null && vmdetails != false && vmdetails.status == 'online' && vmdetails.locked == 0);
+
+                if (is_online && typeof online_fn === 'function') {
+                    online_fn();
+                } else if (!is_online && typeof offline_fn === 'function') {
+                    offline_fn();
+                }
+            }
+    });
+}
+
+function translateMessage(msg_pattern, es_msg, en_msg)
+{
+    if($('.notifier-pas p span').length > 0 && (typeof(msg_pattern) == 'undefined' || $('.notifier-pas p span').text().match(msg_pattern)))
+    {
+        if(typeof(en_msg) != 'undefined' && typeof(en_msg) != 'undefined')
+        {
+            $('.notifier-pas p span').text(en_msg + "|" + es_msg);
+            splitMsg();
+        }
+        else if(typeof(es_msg) != 'undefined')
+        {
+            $('.notifier-pas p span').append("|" + es_msg);
+            splitMsg();
+        }
+        else if(typeof(en_msg) != 'undefined')
+        {
+            $('.notifier-pas p span').prepend("|" + en_msg);
+            splitMsg();
+        }
+    }
+}
+
+function parseAjaxResponse(data)
+{
+    if (data.indexOf('<!-- {') != 0) {
+        return false;
+    }
+
+    var codes = eval('(' + data.substr(data.indexOf('<!-- ') + 4, data.indexOf('-->') - 4) + ')');
+    var i=0;
+
+    for(i=0;i<codes.ERROR.length;i++) {
+        addMessage(codes.ERROR[i], 'error');
+    }
+
+    for(i=0;i<codes.INFO.length;i++) {
+        addMessage(codes.INFO[i], 'info');
+    }
+
+    return data.substr(data.indexOf('-->') + 3, data.length);
+}
+
+
+function IsValidDomain(domain) {
+    var re = RegExp(/^[ña-zA-Z0-9._-]+$/i);
+    return domain.match(re) != null;
+}
+
+
+/**
+ * Get a string with (possibly) HTML entities in it and returns the string
+ * with the HTML entities decoded.
+ *
+ * This function is secure against XSS attacks.
+ * e.g. the following instruction will *NOT* show any alert message:
+ * console.log(decodeEntities('<img src="nonexistent_image" onerror="alert(1337)">'))
+ */
+function decodeHtmlEntities(encoded_string) {
+    var text_area = document.createElement('textarea');
+    text_area.innerHTML = encoded_string;
+    return text_area.value;
+}

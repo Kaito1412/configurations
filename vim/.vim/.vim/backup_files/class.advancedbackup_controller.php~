@@ -1,0 +1,233 @@
+<?php
+
+require_once APPDIR_MODULES . 'Hosting/gigashosting/models/class.advanced_backup.php';
+require_once APPDIR_MODULES . 'Hosting/gigashosting/models/class.vlan.php';
+require_once APPDIR_MODULES . 'Hosting/gigashosting/libs/class.advancedbackup.php';
+require_once APPDIR_MODULES . 'Hosting/gigashosting/libs/class.gigasapi.php';
+require_once APPDIR_MODULES . 'Hosting/gigashosting/user/class.product_controller.php';
+
+
+class AdvancedBackup extends ProductController
+{
+    public function __construct($controller)
+    {
+        parent::__construct($controller);
+        $this->backup = new GIGAS_AdvancedBackupModel($this->details['account']['id']);
+        $this->template->assign('backup_config', $this->backup->config);
+    }
+
+    public function service()
+    {
+        $vms = $this->user_api->get('/advanced_backups')->json();
+        if (count($vms) == 0) {
+            throw new Exception('No backup vms found');
+        }
+        $this->details['vpsid'] = $vms[0]['id'];
+        hbm_redirect('&cmd=clientarea&action=services&service=' . $this->details['service'] .'&vpsdo=vmdetails&vpsid=' . $this->details['vpsid']);
+    }
+
+    public function vmdetails($vm = null)
+    {
+        if (empty($vm)) {
+            $this->admin_api->set_cloud_id($this->service['extra_details']['option6']);
+            $vm = $this->admin_api->get_full_virtual_machine($this->details['vpsid']);
+        }
+
+        if ($_GET['json'] == 'true') {
+            die(json_encode($vm)."");
+        }
+
+        if ($vm['status'] == 'online') {
+            if (empty($this->backup->config)) {
+                hbm_redirect('&cmd=clientarea&action=services&service=' . $this->details['service'] .'&vpsdo=config&vpsid=' . $this->details['vpsid']);
+            }
+
+            if (empty($this->backup->config['size'])) {
+                hbm_redirect('&cmd=clientarea&action=services&service=' . $this->details['service'] .'&vpsdo=configsize&vpsid=' . $this->details['vpsid']);
+            }
+        } elseif ($vm['status'] == 'online' and $this->backup->config['reset_password'] == 1) {
+            # el cliente quiere resetear el password
+            $advanced_backup = new GIGAS_AdvancedBackup($this->details['account']);
+            if ($advanced_backup->reset_password($this->backup->config['password'], $this->details['vpsid'])) {
+                $this->backup->set_password_reset(0);
+                $this->engine->addInfo($this->language->lookupLine('password_updated'));
+            } else {
+                $this->engine->addInfo("We are resetting your Backup Advanced password. This process can take up to a " .
+                    "couple of minutes. You will get full access to the manager when it\'s finished. |" .
+                    "Estamos reseteando la contraseña de tu Backup Avanzado. El proceso puede durar un par de minutos. " .
+                    "Cuando se haya completado tendrás acceso completo al manager. ");
+            }
+        } elseif ($vm and $vm['status'] == 'unbuilt') {
+            # la máquina de backup se está provisionando
+            $this->engine->addInfo($this->language->lookupLine('backupadvwaitconfig'));
+        }
+        
+        $this->template->assign('VMDetails', $vm);
+    }
+
+    public function config()
+    {
+        $vm = $this->user_api->get('/advanced_backup/' . $this->details['vpsid'])->json();
+        if ($vm['status'] != 'online') {
+            hbm_redirect('&cmd=clientarea&action=services&service=' . $this->details['service'] .'&vpsdo=vmdetails&vpsid=' . $this->details['vpsid']);
+        }
+
+        if (empty($this->backup->config)) {
+            $api = new GApiWrapper();
+            $server = $api->getServerDetails(array('id' => $this->details['account']['server_id']));
+            $dc_accounts = $api->getClientAccountsDetails(array(
+                'id' => $this->details['account']['client_id'],
+                'p_type' => 'onappcloud',
+                'p_subtype' => 'dc',
+                'group_id' => $server['server']['group_id'],
+                'status' => 'Active'
+            ));
+            $used_dc_accounts = $this->backup->get_dc_accounts();
+            $backupadv_accounts = array_filter($dc_accounts['details'], function ($v) use ($used_dc_accounts) {
+                return ! in_array($v['id'], $used_dc_accounts);
+            });
+            $this->template->assign('backupadv_accounts', $backupadv_accounts);
+            $vlan_accounts = $api->getClientAccountsDetails(array(
+                'id' => $this->details['account']['client_id'],
+                'p_type' => 'Other',
+                'p_subtype' => 'vlan',
+                'group_id' => $server['server']['group_id'],
+                'status' => 'Active'
+            ));
+            $this->template->assign('backupadv_vlans', $vlan_accounts['details']);
+        } elseif (empty($this->backup->config['size'])) {
+            hbm_redirect('&cmd=clientarea&action=services&service=' . $this->details['service'] .'&vpsdo=configsize&vpsid=' . $this->details['vpsid']);
+        } else {
+            hbm_redirect('&cmd=clientarea&action=services&service=' . $this->details['service'] .'&vpsdo=vmdetails&vpsid=' . $this->details['vpsid']);
+        }
+    }
+
+    public function saveconfig()
+    {
+        if ($this->request->isPost() and is_null($this->request->getParam('size'))) {
+
+            $params = $this->request->getPost();
+            $dc_account = $this->hapi->getAccountDetails(array('id' => $this->details['dc_account_id']));
+
+            if ($params['password'] != $params['repeat_password']) {
+
+                $this->engine->addError("Passwords doesn't match. |Las contraseñas no coinciden. ");
+
+            } elseif (strlen($params['password']) < 8) {
+
+                $this->engine->addError(
+                    'Password is invalid. Minimum of 8 characters. Use letters, upper and lowercase, ' .
+                    'numbers and symbols to increase the strength of your password. ' .
+                    '|' .
+                    'La contraseña no es válida. Mínimo de 8 caracteres. Alterna mayúsculas, ' .
+                    'números y caracteres especiales para mejorar la seguridad de tu contraseña. '
+                );
+            } elseif ($dc_account['details']['status'] == 'Suspended') {
+
+                $this->engine->addError('ab_dc_suspend');
+
+            } else {
+                
+                $vlan_model = new GIGAS_VlanModel();
+                $vlan = $vlan_model->getDetailsByAccountId($params['vlan_account_id']);
+
+                if (empty($vlan)) {
+
+                    $this->engine->addError('VLAN not found. |VLAN no encontrada. ');
+
+                } else {
+
+                    $params = $this->request->getPost();
+        var_dump($params);
+        die("4");
+                    $backup_config = $this->backup->set_config($params);
+
+                    if (!empty($backup_config)) {
+                        $advanced_backup = new GIGAS_AdvancedBackup($this->details['account']);
+                        $data = array('password' => $backup_config['password'], 'vlan' => $vlan['vlan']);
+                        $config = $advanced_backup->set_config($data, $this->details['vpsid']);
+
+                        if (!empty($config)) {
+                            $this->backup->set_manager_url($config['manager_url']);
+                            $this->engine->addInfo($this->language->lookupLine('backup_adv_infos1'));
+
+                            hbm_redirect('&cmd=clientarea&action=services&service=' . $this->details['service'] .'&vpsdo=configsize&vpsid=' . $this->details['vpsid']);
+                        } else {
+                            $this->backup->del_config();
+                        }
+                    }
+
+                    $this->engine->addError(
+                        'An error occurred while attempting to apply your configuration. |'.
+                        'Se ha producido un error al aplicar la configuración. '
+                    );
+                }
+                
+            }
+        }
+
+        hbm_redirect('&cmd=clientarea&action=services&service=' . $this->details['service'] .'&vpsdo=config&vpsid=' . $this->details['vpsid']);
+    }
+
+    public function configsize()
+    {
+        if (empty($this->backup->config)) {
+            hbm_redirect('&cmd=clientarea&action=services&service=' . $this->details['service'] .'&vpsdo=config&vpsid=' . $this->details['vpsid']);
+        } elseif (empty($this->backup->config['size'])) {
+            try {
+                $backup_sizes = $this->backup->get_sizes();
+            } catch (Exception $e) {
+                $this->engine->addError('ab_api_auth_error');
+                $backup_sizes = array();
+            }
+            $this->template->assign('backup_sizes', $backup_sizes);
+        } else {
+            hbm_redirect('&cmd=clientarea&action=services&service=' . $this->details['service'] .'&vpsdo=vmdetails&vpsid=' . $this->details['vpsid']);
+        }
+    }
+
+    public function saveconfigsize()
+    {
+        if ($this->request->isPost() and ! is_null($this->request->getParam('size'))) {
+            $size = intval($this->request->getParam('size'));
+            $resize = (bool) $this->request->getParam('resize');
+            $diskid = intval($this->details['diskid']);
+            $advanced_backup = new GIGAS_AdvancedBackup($this->details['account']);
+            $result = $advanced_backup->resize($this->details['vpsid'], $size, $this->backup->config, $resize, $diskid);
+
+            if ($result == $advanced_backup::INSUFFICIENT_RESOURCES) {
+                $this->engine->addError('Cloud Datacenter resources cannot be overtaken. |Los recursos del Cloud Datacenter no pueden ser superados. ');
+            } elseif ($result == $advanced_backup::RESOURCES_ERROR) {
+                $this->engine->addError('Error has occurred while modifiying product resources. Please, contact support. |Se ha producido un error al intentar modificar los recursos. Por favor, contacta con soporte.');
+            } elseif ($result == $advanced_backup::RESOURCES_USED) {
+                $this->engine->addError('Not enough free backup space. Please, delete some backups and try again. |No tienes suficiente espacio de backup disponible. Por favor, borra algunos backups e inténtalo de nuevo. ');
+            } elseif ($result == $advanced_backup::INVALID_SIZE) {
+                $msg = $this->language->lookupLine('backup_adv_infos2');
+                $this->engine->addError($msg);
+            } elseif ($result == $advanced_backup::MINIMUM_SIZE) {
+                $disks = $advanced_backup->get_disks($this->details['vpsid']);
+                $disk_size = array_sum(array_map(function ($disk) {
+                    return $disk['disk_size'];
+                }, $disks));
+                $msg = str_replace('#disks_size#', $disk_size, $this->language->lookupLine('backup_adv_infos3'));
+                $this->engine->addError($msg);
+            } elseif ($result == $advanced_backup::ERROR_RESIZING) {
+                $this->engine->addError($this->language->lookupLine('backup_adv_infos6'));
+            } else {
+                if ($result == $advanced_backup::OK_PROVISIONING) {
+                    $this->engine->addInfo($this->language->lookupLine('backup_adv_infos4'));
+                } elseif ($result == $advanced_backup::OK_SAVED) {
+                    $this->engine->addInfo($this->language->lookupLine('backup_adv_infos7'));
+                } elseif ($result == $advanced_backup::ERROR_PROVISIONING) {
+                    $this->engine->addError($this->language->lookupLine('backup_adv_infos5'));
+                }
+                # Guardamos el espacio de backup avanzado en base de datos
+                $this->backup->set_size($size);
+            }
+        }
+
+        var_dump($size);
+        die("1");
+        hbm_redirect('&cmd=clientarea&action=services&service=' . $this->details['service'] .'&vpsdo=vmdetails&vpsid=' . $this->details['vpsid']);
+    }
+}

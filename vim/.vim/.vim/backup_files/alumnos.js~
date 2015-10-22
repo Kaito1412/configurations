@@ -1,0 +1,22 @@
+function AlumnoController ($scope) {
+    $scope.formVisibility = false;
+    $scope.alumnos = [
+        {nombre: "Kaito Mateu", telefono: "123456789", curso: "DAW"},
+        {nombre: "Paco Flaco", telefono: "23456789", curso: "DAW"},
+        {nombre: "ateu", telefono: "1456789", curso: "DAM"},
+        {nombre: "Mateu", telefono: "456789", curso: "DAW"}
+    ];
+
+    $scope.save = function() {
+        $scope.alumnos.push({
+            nombre: $scope.nuevoAlumno.nombre,
+            telefono: $scope.nuevoAlumno.telefono,
+            curso: $scope.nuevoAlumno.curso
+        });
+        $scope.formVisibility = false;
+    };
+
+    $scope.showForm = function () {
+        $scope.formVisibility = true;
+    };
+}

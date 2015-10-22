@@ -1,0 +1,245 @@
+{assign var=can_use_power value=false}
+{foreach from=$widgets item=widg}
+    {if $widg.widget == 'b_power'}
+         {assign var=can_use_power value=true}
+    {/if}
+{/foreach}
+<script>
+    var machine_names = {literal}{{/literal}balancer: '', failover: ''},
+        interval_check = 5000,
+        balancer = {literal}{{/literal}id: {$bal_vpsid}, status: 'online', locked: 0, is_failover: false, service_id: {$service.id}, hostname: '' },
+        failover = {if $fail_vpsid} {literal}{{/literal}id: {$fail_vpsid}, status: 'online', locked: 0, is_failover: true, service_id: {$service.id}, hostname: ''}{else}null{/if};
+
+    {literal}
+
+    function notify_change(target) {
+        var  machine_selector = target.is_failover ? ".failover-box" : ".balancer-box",
+             buttons_selector = target.is_failover ? "#failover-buttons" : "#balancer-buttons",
+             container = target.is_failover ? '#container-failover' : '#container-balancer',
+             machine_class = target.status == "online" ? "on" : "off",
+             button_active = $(buttons_selector + ' #button-active'),
+             button_inactive = $(buttons_selector + ' #button-inactive'),
+             link_poweroff = {/literal}{if $can_use_power}{literal}'/panel/index.php?cmd=clientarea&action=services&service=' + target.service_id + '&act=power_off&vpsid=' + target.id + '&widget=b_power'{/literal}{else}{literal}'#'{/literal}{/if}{literal},
+             link_poweron = {/literal}{if $can_use_power}{literal}'/panel/index.php?cmd=clientarea&action=services&service=' + target.service_id + '&act=power_on&vpsid=' + target.id + '&widget=b_power'{/literal}{else}{literal}'#'{/literal}{/if}{literal},
+             is_active = target.status == 'online';
+
+        if (target.is_failover) {
+            link_poweroff += '&failover='+balancer.id;
+            link_poweron += '&failover='+balancer.id;
+        }
+
+        $(machine_selector + " p span").attr("class", machine_class);
+
+        if (target.locked == 0) {
+            $(container + " .smlswitcher").css('display', 'block');
+            $(container + " #reloj-arena").css('display', 'none');
+            $(container + " #reboot-link").css('display', 'inline');
+            button_active.attr("class", (is_active ? "onmachine-active" : "onmachine-inactive"));
+            button_active.html((is_active ? "" : "<a href='"+link_poweron+"'></a>" ));
+            button_inactive.attr("class", (is_active ? "offmachine-inactive" : "offmachine-active"));
+            button_inactive.html((is_active ? "<a onclick='return confirm(\"{/literal}{$lang.sure_to_poweroff}{literal}\");' href='"+link_poweroff+"'></a>" : ""));
+        } else {
+            $(container + " .smlswitcher").css('display', 'none');
+            $(container + " #reloj-arena").css('display', 'block');
+            $(container + " #reboot-link").css('display', 'none');
+        }
+    }
+
+    function display_hostname(hostname, target) {
+        var selector = target.is_failover ? '#name-failover' : '#name-balancer';
+        $(selector).text(hostname);
+        if (target.is_failover) {
+            failover.hostname = hostname;
+        } else { 
+            balancer.hostname = hostname;
+        }
+    }
+
+    function setServerStatus(target, is_async) {
+        var is_async = typeof is_async !== 'undefined' ? is_async : false;
+        $.ajax({
+                url: '?cmd=clientarea&action=services&service=' + target.service_id + '&vpsid=' + target.id + '&vpsdo=vmdetails&json=true',
+                type: 'GET',
+                async: is_async,
+                success: function(data)
+                {
+                    var tmp = JSON.parse(data.replace(/^.*\-\->[ \n\t]+/g, ''));
+                    if (target.status != tmp.status) { 
+                        target.status = tmp.status;
+                        notify_change(target);
+                    }
+                    if (target.locked != tmp.locked) {
+                        target.locked = tmp.locked;                        
+                        notify_change(target);
+                    } 
+                    if (target.hostname != tmp.hostname) {
+                        target.hostname = tmp.hostname;
+                    }
+                }
+        });
+    }
+
+    function doInstance(instance_id, action) {
+        url = '/panel/index.php?cmd=clientarea&action=services&service=' + balancer.service_id + '&vpsdo=balancer&vpsid=' + balancer.id + '&do=' + action;
+        $.ajax({type: 'POST', 
+                url: url, 
+                data: {"balancer_id": instance_id}, 
+                async: false,
+                success: function(data, textStatus, jqxhr)
+                {
+                    var resp_parsed = JSON.parse(jqxhr.responseText.replace("<!-- " ,"").replace(" -->", ""));
+                    if(resp_parsed.ERROR == 0)
+                    {
+                        final_resp = resp_parsed.INFO[0];
+                        type_info = "info";
+                    }
+                    else
+                    {
+                        final_resp = resp_parsed.ERROR[0];
+                        type_info = "error";
+                    }
+                    destroyMessage();
+                    addMessage(final_resp, type_info);
+                    window.location.href='/panel/index.php?cmd=clientarea&action=services&service=' + balancer.service_id;
+                }});
+    }
+
+    function activateInstance(instance_id) {
+        return doInstance(instance_id, 'activate');
+    }
+
+    function deactivateInstance(instance_id) {
+        return doInstance(instance_id, 'deactivate');
+    }
+
+    $(function() {
+        notify_change(balancer, 'status');
+        setServerStatus(balancer, false);
+        display_hostname(balancer.hostname, balancer);
+        var balancer_interval_id = setInterval(function (){
+            setServerStatus(balancer);
+        }, interval_check);
+
+        if(failover) {
+            notify_change(failover, 'status');
+            setServerStatus(failover);
+            display_hostname(failover.hostname, failover);
+            var failover_interval_id = setInterval(function (){
+                setServerStatus(failover);
+            }, interval_check);
+
+            $('.failover-box #reboot-link').attr(
+                'href',
+                $('.failover-box #reboot-link').attr('href').replace('FAILOVER', failover.id)
+            )
+        }
+    });
+
+    $('#reboot-link').click(function(e) {
+        if (!confirm('{/literal}{$lang.sure_to_reboot}{literal}')) {
+            e.preventDefault();
+            return false;
+        }
+    });
+{/literal}
+</script>
+<div class="formwrap">
+<div id="container-balancer" class="vm-container-balancer">
+	<div class="switcher-box">
+            <img id="reloj-arena" src="/panel/templates/darthmaul/images/relojdearena.gif" style="display:none;width:50px;float:left;margin-top:15px;margin-right:60px;">
+            <li class="smlswitcher" style="display:block;">
+                <ul class="bal-fix" id="balancer-buttons">
+                    <li id="button-active" class="onmachine-active"></li>
+                    <li id="button-inactive" class="offmachine-inactive"><a href="#"></a></li>
+                </ul>
+            </li>
+    </div>
+    
+    <div class="vm-bal-box balancer-box">
+    	<p class="dominio">
+        	<span class="on"></span>
+            <strong><a href="#" id="name-balancer"></a></strong>
+            <a id="reboot-link" href="{if $can_use_power}/panel/index.php?cmd=clientarea&action=services&service={$service.id}&act=reboot&vpsid={$vpsid}&widget=b_power{else}#{/if}" class="default-button fright">{$lang.reboot}</a>
+        </p>
+    </div>
+	
+</div>
+
+{if $fail_vpsid}
+  <div class="failover-tt">{$lang.balancer_failover}</div>
+<div id="container-failover" class="vm-container-balancer">
+	<div class="switcher-box">
+            <img id="reloj-arena" src="/panel/templates/darthmaul/images/relojdearena.gif" style="display:none;width:50px;float:left;margin-top:15px;margin-right:60px;">
+            <li class="smlswitcher" style="display:block;">
+                <ul class="bal-fix" id="failover-buttons">
+                    <li id="button-active" class="onmachine-inactive"><a href="#"></a></li>
+                    <li id="button-inactive" class="offmachine-active"></li>
+                </ul>
+            </li>
+    </div>
+    
+    <div class="vm-bal-box failover-box">
+    	<p class="dominio">
+        	<span class="on"></span>
+            <strong><a href="#" id="name-failover"></a></strong>
+            <a id="reboot-link" href="{if $can_use_power}/panel/index.php?cmd=clientarea&action=services&service={$service.id}&act=reboot&vpsid=FAILOVER&widget=b_power&failover=1{else}#{/if}" class="default-button fright">{$lang.reboot}</a>
+
+        </p>
+    </div>
+</div>
+{/if}
+
+<div class="renov b-btn bal-ajust-font">
+	<a href="{$ca_url}clientarea/services/{$service.slug}/{$service.id}/&vpsid={$vpsid}&widget=b_vlans" class="default-button">VLAN</a>
+	<a href="?cmd=clientarea&action=services&service={$service.id}&vpsdo=billing" class="default-button" style="font-size: 0.8em">{$lang.billing_info}</a>
+</div>
+
+<div class="instances-listing">
+	<h3>Instancias</h3>
+
+    {if !$balancers}
+   	  <li><span>{$lang.Balancer_No_instances}</span></li>
+    {else}
+    <ul class="instance-list-item">
+    {foreach from=$balancers item=balancer key=key}
+
+    	<li class="llswitcher">
+
+        
+                        <ul class="bal-fix">
+                            <li class="{if $balancer.status}llonmachine-active{else}llonmachine-inactive{/if}">
+{if !$balancer.status}<a href="#" onclick="activateInstance({$balancer.id});"></a>{/if}
+
+</a></li>
+                            <li class="{if $balancer.status}lloffmachine-inactive{else}lloffmachine-active{/if}">
+
+{if $balancer.status}<a href="#" onclick="deactivateInstance({$balancer.id});"></a>{/if}
+
+</li>
+                        </ul>
+            
+                        
+                        <strong>{$balancer.name}</strong>
+                        <span>
+{if $balancer.data.ip == "*"}
+ {$lang.all_instances} : {$balancer.data.port}
+{else}
+ {$balancer.data.listen}  
+{/if}
+ | {$balancer.data.balance}</span>
+                       <!-- :80 | Leastconn -->
+                        <a href="/panel/index.php?/&cmd=clientarea&action=services&service={$service.id}&vpsid={$bal_vpsid}&vpsdo=basic&balancer_id={$balancer.id}" class="default-button fright">{$lang.balancer_details}</a>
+         </li>
+
+    {/foreach}
+    </ul>
+    {/if}
+
+
+    <br>
+
+    <a href="{$ca_url}clientarea/services/{$service.slug}/{$service.id}/&vpsid={$vpsid}&widget=b_balancer_stats" class="default-button">{$lang.bal_stats}</a>
+
+</div>   
+</div> 
+

@@ -1,0 +1,630 @@
+<?php
+/**
+ *
+ * @ This file is created by DeZend.Org
+ * @ DeZend (PHP5 Decoder for ionCube Encoder)
+ *
+ * @	Version			:	1.1.7.0
+ * @	Author			:	TuhanTS
+ * @	Release on		:	25.02.2013
+ * @	Official site	:	http://DeZend.Org
+ *
+ */
+
+class Nominet extends DomainModule {
+	private $version = '1.0';
+	private $description = 'Nominet domain registrar module';
+	private $lang = array( 'english' => array( 'Nominetlogin' => 'Tag', 'Nominetpassword' => 'Password', 'Nominetsecure' => 'Secure Connection', 'Nominettestmode' => 'Test Mode' ) );
+	private $commands = array( 0 => 'Register', 1 => 'Renew', 2 => 'ContactInfo', 3 => 'EppCode' );
+	private $clientCommands = array( 0 => 'ContactInfo', 1 => 'EmailForwarding', 2 => 'DNSmanagement', 3 => 'RegisterNameServers', 4 => 'EppCode' );
+	private $configuration = array( 'login' => array( 'value' => '', 'type' => 'input', 'default' => false ), 'password' => array( 'value' => '', 'type' => 'input', 'default' => false ), 'secure' => array( 'value' => '', 'type' => 'check', 'default' => false ), 'testmode' => array( 'value' => '', 'type' => 'check', 'default' => false ) );
+	protected $lastError = '';
+	protected $socket = false;
+	protected $debug = '';
+
+	function addError($err) {
+		parent::adderror( $err );
+		$this->lastError = $err;
+	}
+
+	function mod($a, $b) {
+		return $a % $b;
+	}
+
+	function readInteger() {
+		$buf = fread( $this->socket, 4 );
+
+		if (strlen( $buf ) < 4) {
+			$this->debug .= 'failed to read 4 bytes
+';
+			return false;
+		}
+
+		$b0 = ord( $buf[0] );
+		$b1 = ord( $buf[1] );
+		$b2 = ord( $buf[2] );
+		$b3 = ord( $buf[3] );
+		$value = $b3 + 256 * ( $b2 + 256 * ( $b1 + 256 * $b0 ) );
+		$this->debug .= '' . 'integer read from socket: ' . $value . '
+';
+		return $value;
+	}
+
+	function readString($bytes) {
+		$this->debug .= '' . 'waiting for ' . $bytes . ' bytes
+';
+		$left = $bytes;
+		$data = '';
+
+		if (1000000 < $bytes) {
+			return false;
+		}
+
+
+		while (!feof( $this->socket )) {
+			$chunk = fread( $this->socket, $left );
+			$data .= $chunk;
+			$left = $left - strlen( $chunk );
+
+			if ($left == 0) {
+				break;
+			}
+		}
+
+		return $data;
+	}
+
+	function readEppString() {
+		$len = $this->readInteger(  );
+
+		if ($len === false) {
+			return false;
+		}
+
+		$len = $len - 4;
+		return $this->readString( $len );
+	}
+
+	function writeInteger($value) {
+		$b3 = $this->mod( $value, 256 );
+		$value = ( $value - $b3 ) / 256;
+		$b2 = $this->mod( $value, 256 );
+		$value = ( $value - $b2 ) / 256;
+		$b1 = $this->mod( $value, 256 );
+		$value = ( $value - $b1 ) / 256;
+		$b0 = $this->mod( $value, 256 );
+		$this->debug .= '' . $value . ' split up in bytes : ' . $b0 . ' ' . $b1 . ' ' . $b2 . ' ' . $b3 . '
+';
+		fwrite( $this->socket, chr( $b0 ), 1 );
+		fwrite( $this->socket, chr( $b1 ), 1 );
+		fwrite( $this->socket, chr( $b2 ), 1 );
+		fwrite( $this->socket, chr( $b3 ), 1 );
+	}
+
+	function writeEppString($message) {
+		$len = strlen( $message );
+		$this->debug .= '' . 'len: ' . $len . '
+';
+		$len = $len + 4;
+		$this->debug .= '' . 'total message length: ' . $len . ' bytes
+';
+		$this->writeInteger( $len );
+		$this->debug .= 'writing message itself
+';
+		$written = fwrite( $this->socket, $message );
+		$this->debug .= '' . 'bytes written: ' . $written . '
+';
+	}
+
+	function getAuthParams() {
+		$params = array( 'command' => array( 'login' => array( 'clID' => $this->configuration['login']['value'], 'pw' => $this->configuration['password']['value'], 'options' => array( 'version' => '1.0', 'lang' => 'en' ), 'svcs' => array( 'objURI__1' => 'http://www.nominet.org.uk/epp/xml/nom-domain-2.0', 'objURI__2' => 'http://www.nominet.org.uk/epp/xml/nom-notifications-2.0', 'objURI__3' => 'http://www.nominet.org.uk/epp/xml/nom-account-2.0', 'objURI__4' => 'http://www.nominet.org.uk/epp/xml/nom-contact-2.0' ) ), 'clTRID' => Utilities::generatepassword( 10 ) ) );
+		return $params;
+	}
+
+	function testConnection() {
+		$params = array( 'hello' => '' );
+		$out = $this->get( $params );
+
+		if ($out) {
+			return true;
+		}
+
+	}
+
+	function get($params, $stop = false) {
+		if (!$this->socket) {
+			$url = ($this->configuration['secure']['value'] == '1' ? 'ssl://' : 'tcp://');
+			$url .= ($this->configuration['testmode']['value'] == '1' ? 'testbed-epp.nominet.org.uk' : 'epp.nominet.org.uk');
+			$port = ($this->configuration['secure']['value'] == '1' ? '700' : '8700');
+			$this->socket = fsockopen( $url, $port, $errno, $errstr, 50 );
+
+			if (!$this->socket) {
+				$err = 'Unable to connect to: ' . $url . ':' . $port;
+				$this->addError( $errno );
+				$this->addError( $errstr );
+
+				if (( $errstr && $errno )) {
+					$err .= ', (' . $errno . ') ' . $errstr;
+				}
+
+				$this->debug .= $err . '
+';
+				$this->addError( $err );
+				$this->socket = 'error';
+			}
+		}
+
+
+		if ($this->socket == 'error') {
+			return false;
+		}
+
+		$this->debug .= ( '' . 'ok, connected to ' . $url . ' at port ' . $port . '
+' );
+		$out = $this->readEppString(  );
+
+		if (!$out) {
+			$this->socket = 'error';
+		}
+
+		$request = $this->prepareRequest( $this->getAuthParams(  ) );
+		$request .= $this->prepareRequest( $params );
+		$this->writeEppString( $request );
+		$out = $this->readEppString(  );
+		$out = $this->parseResponse( $out );
+
+		if (( !isset( $out->response->result ) || $out->response->result['code'] != '1000' )) {
+			if ($out === false) {
+				$this->addError( 'Authentication error: Couldn\'t parse the response.' );
+				$this->socket = 'error';
+				return false;
+			}
+
+
+			if (isset( $out->response->result->msg )) {
+				$this->addError( (bool)$out->response->result->msg );
+				$this->socket = 'error';
+				return false;
+			}
+
+			$this->addError( UNKNOWN_ERROR );
+			return false;
+		}
+
+		$out = $this->readEppString(  );
+		$out = str_replace( array( 'domain:', 'contact:', 'account:' ), array( 'domain_', 'contact_', 'account_' ), $out );
+		$out = $this->parseResponse( $out );
+		unset( [socket] );
+
+		if (( ( !isset( $out->response->result ) || $out->response->result['code'] != '1000' ) && !isset( $out->greeting ) )) {
+			if ($out === false) {
+				$this->addError( 'Couldn\'t parse the response.' );
+				return false;
+			}
+
+
+			if (isset( $out->response->result->msg )) {
+				$this->addError( (bool)$out->response->result->msg );
+
+				if (!empty( $out->response->resData->domain_failData->domain_reason )) {
+					$this->addError( (bool)$out->response->resData->domain_failData->domain_reason );
+				}
+
+				return false;
+			}
+
+			$this->addError( UNKNOWN_ERROR );
+			return false;
+		}
+
+		return $out;
+	}
+
+	function prepareRequest($params) {
+		DomDocument;
+		$xmldoc = new ( '1.0', 'UTF-8' );
+		$xmldoc->formatOutput = true;
+		$request = $xmldoc->createElement( 'epp' );
+		$request->setAttribute( 'xmlns', 'urn:ietf:params:xml:ns:epp-1.0' );
+		$request->setAttribute( 'xmlns:xsi', 'http://www.w3.org/2001/XMLSchema-instance' );
+		$request->setAttribute( 'xsi:schemaLocation', 'urn:ietf:params:xml:ns:epp-1.0 epp-1.0.xsd' );
+		$xmldoc->appendChild( $request );
+
+		if (is_array( $params )) {
+			$this->prepareArray( $xmldoc, $request, $params );
+		}
+
+		return $xmldoc->saveXML(  );
+	}
+
+	function prepareArray(&$xmldoc, $node, $array) {
+		foreach ($array as $key => $value) {
+			if (strpos( $key, '__' ) !== false) {
+				$key = substr( $key, 0, strpos( $key, '__' ) );
+			}
+
+
+			if ($key == '_attrib') {
+				$node->setAttribute( $value[0], $value[1] );
+				continue;
+			}
+
+
+			if (is_array( $value )) {
+				$nd = $xmldoc->createElement( $key );
+				$this->prepareArray( $xmldoc, $nd, $value );
+			}
+			else {
+				if (( $value != false && $value != '' )) {
+					$nd = $xmldoc->createElement( $key, $value );
+				}
+				else {
+					$nd = $xmldoc->createElement( $key );
+				}
+			}
+
+			$node->appendChild( $nd );
+		}
+
+	}
+
+	function parseResponse($response_string) {
+		if (!$response_string) {
+			return false;
+		}
+
+		$a = @simplexml_load_string( $response_string );
+
+		if ($a === FALSE) {
+			return false;
+		}
+
+		return $a;
+	}
+
+	function checkAvailability() {
+		$params = array( 'command' => array( 'check' => array( 'domain:check' => array( '_attrib__1' => array( 'xmlns:domain', 'http://www.nominet.org.uk/epp/xml/nom-domain-2.0' ), '_attrib__2' => array( 'xsi:schemaLocation', 'http://www.nominet.org.uk/epp/xml/nom-domain-2.0  nom-domain-2.0.xsd' ), 'domain:name' => $this->name ) ), 'clTRID' => Utilities::generatepassword( 10 ) ) );
+		$out = $this->get( $params );
+
+		if ($out) {
+			if ($out->response->resData->domain_chkData->domain_cd->domain_name['avail'] == '1') {
+				return true;
+			}
+		}
+
+	}
+
+	function Register() {
+		if (!isset( $this->options['ext']['type'] )) {
+			$this->addError( 'Please edit Extended Attributes and fill the "Legal Type of Registrant" field!' );
+			return false;
+		}
+
+		$params = array( 'command' => array( 'create' => array( 'domain:create' => array( '_attrib__1' => array( 'xmlns:domain', 'http://www.nominet.org.uk/epp/xml/nom-domain-2.0' ), '_attrib__2' => array( 'xsi:schemaLocation', 'http://www.nominet.org.uk/epp/xml/nom-domain-2.0  nom-domain-2.0.xsd' ), 'domain:name' => $this->name, 'domain:period' => $this->period, 'domain:account' => array( 'account:create' => array( '_attrib__1' => array( 'xmlns:account', 'http://www.nominet.org.uk/epp/xml/nom-account-2.0' ), '_attrib__2' => array( 'xmlns:contact', 'http://www.nominet.org.uk/epp/xml/nom-contact-2.0' ), 'account:name' => $this->options['firstname'] . ' ' . $this->options['lastname'] ) ) ) ), 'clTRID' => Utilities::generatepassword( 10 ) ) );
+
+		if (( isset( $this->options['companyname'] ) && $this->options['companyname'] != '' )) {
+			$params['command']['create']['domain:create']['domain:account']['account:create']['account:trad-name'] = $this->options['companyname'];
+		}
+
+		$params['command']['create']['domain:create']['domain:account']['account:create']['account:type'] = $this->options['ext']['type'];
+
+		if (isset( $this->options['ext']['co_no'] )) {
+			$params['command']['create']['domain:create']['domain:account']['account:create']['account:co-no'] = $this->options['ext']['co_no'];
+		}
+
+		$params['command']['create']['domain:create']['domain:account']['account:create']['account:opt-out'] = ($this->details['idprotection'] == '1' ? 'Y' : 'N');
+		$params['command']['create']['domain:create']['domain:account']['account:create']['account:addr'] = array( 'account:street__1' => $this->options['address1'], 'account:street__2' => $this->options['state'], 'account:city' => $this->options['city'], 'account:county' => $this->options['state'], 'account:postcode' => $this->options['postcode'], 'account:country' => $this->options['country'] );
+		$params['command']['create']['domain:create']['domain:account']['account:create']['account:contact'] = array( '_attrib' => array( 'order', 1 ), 'contact:create' => array( 'contact:name' => $this->options['firstname'] . ' ' . $this->options['lastname'], 'contact:phone' => str_replace( ' ', '', $this->options['phonenumber'] ), 'contact:email' => $this->options['email'] ) );
+		$i = 1;
+
+		while (isset( $this->options['' . 'ns' . $i] )) {
+			if ($this->options['' . 'ns' . $i] != '') {
+				$params['command']['create']['domain:create']['domain:ns']['' . 'domain:host__' . $i]['domain:hostName'] = $this->options['' . 'ns' . $i];
+			}
+
+			++$i;
+		}
+
+		$out = $this->get( $params, true );
+
+		if ($out) {
+			$this->addDomain( 'Active' );
+			$this->addInfo( $return['attributes']['registration_text'] );
+			return true;
+		}
+
+		return false;
+	}
+
+	function Renew() {
+		$params = array( 'command' => array( 'renew' => array( 'domain:renew' => array( '_attrib__1' => array( 'xmlns:domain', 'http://www.nominet.org.uk/epp/xml/nom-domain-2.0' ), '_attrib__2' => array( 'xsi:schemaLocation', 'http://www.nominet.org.uk/epp/xml/nom-domain-2.0  nom-domain-2.0.xsd' ), 'domain:name' => $this->name, 'domain:period' => $this->period ) ), 'clTRID' => Utilities::generatepassword( 10 ) ) );
+		$out = $this->get( $params );
+
+		if ($out) {
+			$this->addPeriod(  );
+			$this->addInfo( 'Renew: Success' );
+			return true;
+		}
+
+		return false;
+	}
+
+	function Transfer() {
+	}
+
+	function getArrayfromxml($in) {
+		if (is_object( $in )) {
+			$in = (array)$in;
+		}
+
+
+		if (is_array( $in )) {
+			$return = array(  );
+			foreach ($in as $k => $v) {
+				$return[$k] = $this->getArrayfromxml( $v );
+			}
+
+			return $return;
+		}
+
+		return $in;
+	}
+
+	function getDomainInformation() {
+		$params = array( 'command' => array( 'info' => array( 'domain:info' => array( '_attrib__1' => array( 'xmlns:domain', 'http://www.nominet.org.uk/epp/xml/nom-domain-2.0' ), '_attrib__2' => array( 'xsi:schemaLocation', 'http://www.nominet.org.uk/epp/xml/nom-domain-2.0  nom-domain-2.0.xsd' ), 'domain:name' => $this->name ) ), 'clTRID' => Utilities::generatepassword( 10 ) ) );
+		$out = $this->get( $params );
+
+		if ($out) {
+			if (isset( $out->response->resData->domain_infData )) {
+				$parsed = $this->getArrayfromxml( $out->response->resData->domain_infData );
+				$return = array( 'nameservers' => array(  ), 'contactinfo' => array(  ), 'expires' => date( 'Y-m-d', strtotime( $parsed['domain_exDate'] ) ), 'auto-renew' => (( isset( $parsed['domain_auto-bill'] ) && 0 < $parsed['domain_auto-bill'] ) ? '1' : '0'), 'idprotection' => (( isset( $parsed['domain_account']['account_infData']['account_opt-out'] ) && $parsed['domain_account']['account_infData']['account_opt-out'] == 'Y' ) ? '1' : '0'), 'status' => 'Active' );
+
+				if (( isset( $parsed['domain_ns']['domain_host'] ) && is_array( $parsed['domain_ns']['domain_host'] ) )) {
+					foreach ($parsed['domain_ns']['domain_host'] as $ns) {
+						$return['nameservers'][] = rtrim( $ns['domain_hostName'], '. ' );
+					}
+				}
+
+				$return['contactinfo'] = array( 'firstname' => $parsed['domain_account']['account_infData']['account_contact']['contact_infData']['contact_name'], 'lastname' => 'disabled', 'companyname' => $parsed['domain_account']['account_infData']['account_trad-name'], 'email' => $parsed['domain_account']['account_infData']['account_contact']['contact_infData']['contact_email'], 'address1' => $parsed['domain_account']['account_infData']['account_addr']['account_street'], 'address2' => 'disabled', 'city' => $parsed['domain_account']['account_infData']['account_addr']['account_city'], 'state' => $parsed['domain_account']['account_infData']['account_addr']['account_county'], 'postcode' => $parsed['domain_account']['account_infData']['account_addr']['account_postcode'], 'country' => $parsed['domain_account']['account_infData']['account_addr']['account_country'], 'phonenumber' => $parsed['domain_account']['account_infData']['account_contact']['contact_infData']['contact_phone'] );
+				return $return;
+			}
+
+			$this->addError( 'Can\'t get domain information from registrar. Wrong response.' );
+		}
+
+	}
+
+	function getExtendedAttributes() {
+		if (( !isset( $this->name ) || $this->name == '' )) {
+			$this->name = $this->options['sld'] . '.' . $this->options['tld'];
+		}
+
+
+		if (substr( $this->name, 0 - 2 ) == 'uk') {
+			$attributes[] = array( 'name' => 'type', 'description' => 'Legal Type of Registrant Contact', 'type' => 'select', 'option' => array( array( 'value' => 'IND', 'title' => 'UK individual' ), array( 'value' => 'FIND', 'title' => 'Non-UK individual' ), array( 'value' => 'LTD', 'title' => 'UK Limited Company' ), array( 'value' => 'PLC', 'title' => 'UK Public Limited Company' ), array( 'value' => 'PTNR', 'title' => 'UK Partnership' ), array( 'value' => 'LLP', 'title' => 'UK Limited Liability Partnership' ), array( 'value' => 'IP', 'title' => 'UK Industrial/Provident Registered Company' ), array( 'value' => 'STRA', 'title' => 'UK Sole Trader' ), array( 'value' => 'SCH', 'title' => 'UK School' ), array( 'value' => 'RCHAR', 'title' => 'UK Registered Charity' ), array( 'value' => 'GOV', 'title' => 'UK Government Body' ), array( 'value' => 'OTHER', 'title' => 'UK Entity (other)' ), array( 'value' => 'CRC', 'title' => 'UK Corporation by Royal Charter' ), array( 'value' => 'FCORP', 'title' => 'Foreign Organization' ), array( 'value' => 'STAT', 'title' => 'UK Statutory Body FIND' ), array( 'value' => 'FOTHER', 'title' => 'Other Foreign Organizations' ) ) );
+			$attributes[] = array( 'description' => 'Company Identification Number', 'name' => 'co_no', 'type' => 'input', 'option' => false );
+			$extension = 'uk';
+		}
+
+
+		if (!empty( $attributes )) {
+			foreach ($attributes as ) {
+				$attr = &[0];
+
+				if (isset( $this->options['ext'][$attr['name']] )) {
+					$attr['default'] = $this->options['ext'][$attr['name']];
+					continue;
+				}
+			}
+
+			return array( $extension => $attributes );
+		}
+
+	}
+
+	function getAutoRenew() {
+		$info = $this->getDomainInformation(  );
+
+		if (!$info) {
+			return false;
+		}
+
+		return $info['auto-renew'];
+	}
+
+	function updateAutoRenew() {
+		$renew = $this->getAutoRenew(  );
+
+		if ($this->options['autoRenew'] == $renew) {
+			return false;
+		}
+
+
+		if ($this->options['autoRenew'] == 1) {
+			$change = array( 'from' => 'Disabled', 'to' => 'Enabled' );
+		}
+		else {
+			$change = array( 'from' => 'Enabled', 'to' => 'Disabled' );
+		}
+
+		$params = array( 'command' => array( 'update' => array( 'domain:update' => array( '_attrib__1' => array( 'xmlns:domain', 'http://www.nominet.org.uk/epp/xml/nom-domain-2.0' ), '_attrib__2' => array( 'xsi:schemaLocation', 'http://www.nominet.org.uk/epp/xml/nom-domain-2.0  nom-domain-2.0.xsd' ), 'domain:name' => $this->name, 'domain:auto-bill' => ($this->options['autoRenew'] == 1 ? '1' : '0') ) ), 'clTRID' => Utilities::generatepassword( 10 ) ) );
+		$out = $this->get( $params );
+
+		if ($out) {
+			$this->logAction( array( 'action' => 'Update Auto Renew', 'result' => true, 'change' => $change, 'error' => false ) );
+			$this->addInfo( 'Auto Renew updated successfully.' );
+			return true;
+		}
+
+		$this->logAction( array( 'action' => 'Update Auto Renew', 'result' => false, 'change' => $change, 'error' => $this->lastError ) );
+	}
+
+	function getIDProtection() {
+		$info = $this->getDomainInformation(  );
+
+		if (!$info) {
+			return false;
+		}
+
+		return $info['idprotection'];
+	}
+
+	function updateIDProtection() {
+		$idp = $this->getIDProtection(  );
+
+		if ($this->options['IDProtection'] == $idp) {
+			return false;
+		}
+
+
+		if ($this->options['IDProtection'] == 1) {
+			$idp = 'Y';
+			$change = array( 'from' => 'Disabled', 'to' => 'Enabled' );
+		}
+		else {
+			$idp = 'N';
+			$change = array( 'from' => 'Enabled', 'to' => 'Disabled' );
+		}
+
+		$params = array( 'command' => array( 'update' => array( 'domain:update' => array( '_attrib__1' => array( 'xmlns:domain', 'http://www.nominet.org.uk/epp/xml/nom-domain-2.0' ), '_attrib__2' => array( 'xsi:schemaLocation', 'http://www.nominet.org.uk/epp/xml/nom-domain-2.0  nom-domain-2.0.xsd' ), 'domain:name' => $this->name, 'domain:account' => array( 'account:update' => array( '_attrib__1' => array( 'xmlns:account', 'http://www.nominet.org.uk/epp/xml/nom-account-2.0' ), '_attrib__2' => array( 'xmlns:contact', 'http://www.nominet.org.uk/epp/xml/nom-contact-2.0' ), 'account:opt-out' => $idp ) ) ) ), 'clTRID' => Utilities::generatepassword( 10 ) ) );
+		$out = $this->get( $params );
+
+		if ($out) {
+			$this->logAction( array( 'action' => 'Update ID Protection', 'result' => true, 'change' => $change, 'error' => false ) );
+			$this->addInfo( 'ID Protection updated successfully.' );
+			return true;
+		}
+
+		$this->logAction( array( 'action' => 'Update ID Protection', 'result' => false, 'change' => $change, 'error' => $this->lastError ) );
+	}
+
+	function getNameServers() {
+		$info = $this->getDomainInformation(  );
+
+		if (!$info) {
+			return false;
+		}
+
+		return $info['nameservers'];
+	}
+
+	function updateNameServers() {
+		$ns = array(  );
+		$i = 1;
+		$change = '';
+		$getNS = $this->getNameServers(  );
+
+		while (isset( $this->options['' . 'ns' . $i] )) {
+			if ($this->options['' . 'ns' . $i] != '') {
+				$ns[] = $this->options['' . 'ns' . $i];
+			}
+
+
+			if ($this->options['' . 'ns' . $i] != $getNS[$i - 1]) {
+				$change[] = array( 'name' => 'Name Server ' . $i, 'from' => $getNS[$i - 1], 'to' => ($this->options['' . 'ns' . $i] == '' ? 'empty' : $this->options['' . 'ns' . $i]) );
+			}
+
+			++$i;
+		}
+
+
+		if (empty( $change )) {
+			return false;
+		}
+
+		$params = array( 'command' => array( 'update' => array( 'domain:update' => array( '_attrib__1' => array( 'xmlns:domain', 'http://www.nominet.org.uk/epp/xml/nom-domain-2.0' ), '_attrib__2' => array( 'xsi:schemaLocation', 'http://www.nominet.org.uk/epp/xml/nom-domain-2.0  nom-domain-2.0.xsd' ), 'domain:name' => $this->name ) ), 'clTRID' => Utilities::generatepassword( 10 ) ) );
+
+		if (empty( $ns )) {
+			$params['command']['update']['domain:update']['domain:ns'] = false;
+		}
+		else {
+			foreach ($ns as $key => $value) {
+				$params['command']['update']['domain:update']['domain:ns']['' . 'domain:host__' . $key]['domain:hostName'] = $value;
+			}
+		}
+
+		$out = $this->get( $params );
+
+		if ($out) {
+			$this->logAction( array( 'action' => 'Update Name Servers', 'result' => true, 'change' => $change, 'error' => false ) );
+			$this->addInfo( 'Update Name Servers: Success' );
+			return true;
+		}
+
+		$this->logAction( array( 'action' => 'Update Name Servers', 'result' => false, 'change' => $change, 'error' => $this->lastError ) );
+	}
+
+	function getContactInfo() {
+		$info = $this->getDomainInformation(  );
+
+		if (!$info) {
+			return false;
+		}
+
+		return $info['contactinfo'];
+	}
+
+	function updateContactInfo() {
+		$params = array( 'command' => array( 'update' => array( 'domain:update' => array( '_attrib__1' => array( 'xmlns:domain', 'http://www.nominet.org.uk/epp/xml/nom-domain-2.0' ), '_attrib__2' => array( 'xsi:schemaLocation', 'http://www.nominet.org.uk/epp/xml/nom-domain-2.0  nom-domain-2.0.xsd' ), 'domain:name' => $this->name, 'domain:account' => array( 'account:update' => array( '_attrib__1' => array( 'xmlns:account', 'http://www.nominet.org.uk/epp/xml/nom-account-2.0' ), '_attrib__2' => array( 'xmlns:contact', 'http://www.nominet.org.uk/epp/xml/nom-contact-2.0' ), 'account:addr' => array( 'account:street' => $this->options['address1'], 'account:locality' => $this->options['state'], 'account:city' => $this->options['city'], 'account:county' => $this->options['state'], 'account:postcode' => $this->options['postcode'], 'account:country' => $this->options['country'] ), 'account:contact' => array( '_attrib' => array( 'order', 1 ), 'contact:update' => array( 'contact:name' => $this->options['firstname'], 'contact:phone' => $this->options['phonenumber'], 'contact:email' => $this->options['email'] ) ) ) ) ) ), 'clTRID' => Utilities::generatepassword( 10 ) ) );
+		$out = $this->get( $params );
+
+		if ($out) {
+			$this->addInfo( 'Contact Info has been updated.' );
+			$this->logAction( array( 'action' => 'Update Contact Info', 'result' => true, 'change' => false, 'error' => false ) );
+			return true;
+		}
+
+		$this->logAction( array( 'action' => 'Update Contact Info', 'result' => false, 'change' => false, 'error' => $this->lastError ) );
+	}
+
+	function setDomainConfig($config) {
+		$this->domain_config = $config;
+		foreach (array( 'idprotection', 'dnsmanagement', 'emailfwd' ) as $d) {
+			if (isset( $config[$d] )) {
+				$this->details[$d] = $config[$d]['value'];
+				continue;
+			}
+		}
+
+
+		if (!empty( $config )) {
+			foreach ($config as $var => $val) {
+				if (in_array( $var, array( 'idprotection', 'dnsmanagement', 'emailfwd' ) )) {
+					continue;
+				}
+
+
+				if ($val['variable_id'] != '') {
+					$this->options['ext'][$var] = $val['variable_id'];
+					continue;
+				}
+
+
+				if (( $val['value'] == '' && $val['value_name'] != '' )) {
+					$this->options['ext'][$var] = $val['value_name'];
+					continue;
+				}
+
+				$this->options['ext'][$var] = $val['value'];
+			}
+		}
+
+	}
+
+	function synchInfo() {
+		$info = $this->getDomainInformation(  );
+
+		if (!$info) {
+			return false;
+		}
+
+		$return = array(  );
+		$return['expires'] = $info['expires'];
+		$return['status'] = $info['status'];
+		$return['ns'] = $info['nameservers'];
+		$return['autorenew'] = $info['auto-renew'];
+		return $return;
+	}
+}
+
+?>

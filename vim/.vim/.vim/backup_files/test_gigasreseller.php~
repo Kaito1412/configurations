@@ -1,0 +1,396 @@
+<?php
+
+ob_start();
+require_once "index.php";
+ob_end_clean();
+
+
+class DomainTest extends PHPUnit_Framework_TestCase
+{
+    public function testBadContactId()
+    {
+        $mod = ModuleFactory::getModule('Domain', 'class.gigasreseller.php');
+
+        $response = $mod->getContactId();
+        $this->assertEmpty($response);
+    }
+
+    public function testBadContactInfo()
+    {
+        $mod = ModuleFactory::getModule('Domain', 'class.gigasreseller.php');
+
+        $response = $mod->getContactInfo();
+        $this->assertEmpty($response);
+    }
+
+    public function testBadAddContact()
+    {
+        $mod = ModuleFactory::getModule('Domain', 'class.gigasreseller.php');
+
+        $response = $mod->addContact();
+        $this->assertFalse($response);
+    }
+
+    public function testBadGetExtendedAtrtributes()
+    {
+        $mod = ModuleFactory::getModule('Domain', 'class.gigasreseller.php');
+
+        $response = $mod->getExtendedAttributes();
+        $this->assertEmpty($response);
+    }
+
+    public function testBadRegister()
+    {
+        $mod = ModuleFactory::getModule('Domain', 'class.gigasreseller.php');
+
+        $response = $mod->Register();
+        $this->assertFalse($response);
+    }
+
+    public function testBadGetIDProtection()
+    {
+        $mod = ModuleFactory::getModule('Domain', 'class.gigasreseller.php');
+
+        $response = $mod->getIDProtection();
+        $this->assertEmpty($response);
+    }
+
+    public function testBadGetRegistrarLock()
+    {
+        $mod = ModuleFactory::getModule('Domain', 'class.gigasreseller.php');
+
+        $response = $mod->getRegistrarLock();
+        $this->assertEmpty($response);
+    }
+
+    public function testBadGetEppCode()
+    {
+        $mod = ModuleFactory::getModule('Domain', 'class.gigasreseller.php');
+
+        $response = $mod->getEppCode();
+        $this->assertEmpty($response);
+    }
+
+    public function testSend()
+    {
+        $mod = ModuleFactory::getModule('Domain', 'class.gigasreseller.php');
+
+        $url = 'domains/available.json';
+        $params = array(
+            'domain-name'=>'gigastest',
+            'tlds'=>'com'
+        ); 
+
+        $response = $mod->Send($url, $params);
+        $this->assertArrayHasKey($params['domain-name'].'.'.$params['tlds'], $response);
+    }
+    
+    public function testBadGetNameServer()
+    {
+        $mod = ModuleFactory::getModule('Domain', 'class.gigasreseller.php');
+
+        $response = $mod->getNameServers();
+        $this->assertEmpty($response);
+    }
+
+    public function testBadUnistall()
+    {
+        $mod = ModuleFactory::getModule('Domain', 'class.gigasreseller.php');
+
+        $response = $mod->unistall();
+        $this->assertTrue($response);
+    }
+
+    public function testBadSyncInfo()
+    {
+        $mod = ModuleFactory::getModule('Domain', 'class.gigasreseller.php');
+
+        $response = $mod->synchInfo();
+        $this->assertEmpty($response);
+    }
+
+    public function testBadTransfer()
+    {
+        $mod = ModuleFactory::getModule('Domain', 'class.gigasreseller.php');
+
+        $response = $mod->Transfer();
+        $this->assertEmpty($response);
+    }
+
+    public function testBadRenew()
+    {
+        $mod = ModuleFactory::getModule('Domain', 'class.gigasreseller.php');
+
+        $response = $mod->Renew();
+        $this->assertEmpty($response);
+    }
+
+    public function testBadUpdateNameServers()
+    {
+        $mod = ModuleFactory::getModule('Domain', 'class.gigasreseller.php');
+
+        $response = $mod->updateNameServers();
+        $this->assertEmpty($response);
+    }
+
+    public function testBadUpdateContactInfo()
+    {
+        $mod = ModuleFactory::getModule('Domain', 'class.gigasreseller.php');
+
+        $response = $mod->updateContactInfo();
+        $this->assertEmpty($response);
+    }
+
+    public function testBadUpdateDNSManagement()
+    {
+        $mod = ModuleFactory::getModule('Domain', 'class.gigasreseller.php');
+
+        $response = $mod->updateDNSManagement();
+        $this->assertEmpty($response);
+    }
+/*
+    public function testBadUpdatePrivacy()
+    {
+        $mod = ModuleFactory::getModule('Domain', 'class.gigasreseller.php');
+
+        $response = $mod->updatePrivacy(62321238);
+        $this->assertEmpty($response);
+    }
+*/
+    public function testBadUpdateRegistrarLock()
+    {
+        $mod = ModuleFactory::getModule('Domain', 'class.gigasreseller.php');
+
+        $response = $mod->updateRegistrarLock();
+        $this->assertEmpty($response);
+    }
+
+    public function testBadUpdateEmailForwarding()
+    {
+        $mod = ModuleFactory::getModule('Domain', 'class.gigasreseller.php');
+
+        $response = $mod->updateEmailForwarding();
+        $this->assertEmpty($response);
+    }
+
+    public function testBadModifyNameServer()
+    {
+        $mod = ModuleFactory::getModule('Domain', 'class.gigasreseller.php');
+
+        $response = $mod->modifyNameServer();
+        $this->assertEmpty($response);
+    }
+
+    public function testBadDeleteNameServer()
+    {
+        $mod = ModuleFactory::getModule('Domain', 'class.gigasreseller.php');
+
+        $response = $mod->deleteNameServer();
+        $this->assertEmpty($response);
+    }
+
+    public function testBadRegisterNameServer()
+    {
+        $mod = ModuleFactory::getModule('Domain', 'class.gigasreseller.php');
+
+        $response = $mod->registerNameServer();
+        $this->assertEmpty($response);
+    }
+/*
+    public function testGetExtendedAtrtributes()
+    {
+        $mod = ModuleFactory::getModule('Domain', 'class.gigasreseller.php');
+        $mod->getFromDB("5312");
+
+        $response = $mod->getExtendedAttributes();
+        $this->assertEmpty($response);
+    }
+ 
+    public function testGetIDProtection()
+    {
+        $mod = ModuleFactory::getModule('Domain', 'class.gigasreseller.php');
+        $mod->getFromDB("5312");
+
+        $response = $mod->getIDProtection();
+        var_dump($response);
+        $this->assertEmpty($response);
+    }
+
+*/
+    public function testSyncInfo()
+    {
+        $mod = ModuleFactory::getModule('Domain', 'class.gigasreseller.php');
+        $mod->getFromDB("5312");
+
+        $response = $mod->synchInfo();
+        $this->assertArrayHasKey('status', $response);
+    }
+
+    public function testRenew()
+    {
+        $mod = ModuleFactory::getModule('Domain', 'class.gigasreseller.php');
+        $mod->getFromDB("5312");
+
+        $response = $mod->Renew();
+        $this->assertTrue($response);
+    }
+
+    public function testRegisterNameServer()
+    {
+        $mod = ModuleFactory::getModule('Domain', 'class.gigasreseller.php');
+        $mod->setOptions(["NameServerIP" => "8.8.8.8", "NameServer" => "dns1"]);
+        $mod->getFromDB("5312");
+
+        $response = $mod->registerNameServer();
+        $this->assertTrue($response);
+    }
+
+    public function testModifyNameServer()
+    {
+        $mod = ModuleFactory::getModule('Domain', 'class.gigasreseller.php');
+        $options = array(
+            "NameServer" => "dns1",
+            "NameServerOldIP" => "8.8.8.8",
+            "NameServerNewIP" => "4.4.4.4"
+        );
+        $mod->setOptions($options);
+        $mod->getFromDB("5312");
+
+        $response = $mod->modifyNameServer();
+        $this->assertTrue($response);
+    }
+
+/*
+    public function testTransfer()
+    {
+        $mod = ModuleFactory::getModule('Domain', 'class.gigasreseller.php');
+        $mod->getFromDB("5312");
+
+        $response = $mod->Transfer();
+        $this->assertEmpty($response);
+    }
+ */
+
+    public function testGetDNSManagement()
+    {
+        $mod = ModuleFactory::getModule('Domain', 'class.gigasreseller.php');
+        $mod->getFromDB("5312");
+
+        $response = $mod->getDNSManagement();
+        $this->assertArrayHasKey('records', $response);
+    }
+
+    public function testGetEppCode()
+    {
+        $mod = ModuleFactory::getModule('Domain', 'class.gigasreseller.php');
+        $mod->getFromDB("5312");
+
+        $response = $mod->getEppCode();
+        $this->assertInternalType('string', $response);
+    }
+
+    public function testContactInfo()
+    {
+        $mod = ModuleFactory::getModule('Domain', 'class.gigasreseller.php');
+        $mod->getFromDB("5312");
+
+        $response = $mod->getContactInfo();
+        var_dump($resonse);
+        $this->assertArrayHasKey('firstname', $response);
+    }
+    
+    public function testContactId()
+    {
+        $mod = ModuleFactory::getModule('Domain', 'class.gigasreseller.php');
+        $mod->getFromDB("5312");
+
+        $response = $mod->getContactId();
+        $this->assertInternalType('string', $response);
+    }
+
+    public function testAddContact()
+    {
+        $mod = ModuleFactory::getModule('Domain', 'class.gigasreseller.php');
+        $mod->getFromDB("5312");
+
+        $response = $mod->addContact();
+        $this->assertContainsOnly('integer', $response);
+    }
+
+    public function testUpdateContactInfo()
+    {
+        $mod = ModuleFactory::getModule('Domain', 'class.gigasreseller.php');
+        $options = array(
+            "firstname" => "kaito",
+            "lastname" => "mateu",
+            "companyname" => "gigas",
+            "email" => "kaito@gigas.com",
+            "address1" => "calle false, 123",
+            "city" => "valencia",
+            "postdate" => "12345",
+            "phonenumber" => "123546789",
+            "country" => "Spain",
+            "address2" => "segunda linea"
+        );
+        $mod->setOptions($options);
+        $mod->getFromDB("5312");
+
+        $response = $mod->updateContactInfo();
+        $this->assertEmpty($response);
+    }
+
+
+    public function testGetCustomeId()
+    {
+        $mod = ModuleFactory::getModule('Domain', 'class.gigasreseller.php');
+
+        $response = $mod->getCustomerId();
+        $this->assertInternalType('string', $response);
+    }
+
+    public function testGetNameServer()
+    {
+        $mod = ModuleFactory::getModule('Domain', 'class.gigasreseller.php');
+        $mod->getFromDB("5312");
+
+        $response = $mod->getNameServers();
+        $this->assertCount(4, $response);
+    }
+
+    public function testDeleteNameServer()
+    {
+        $mod = ModuleFactory::getModule('Domain', 'class.gigasreseller.php');
+        $mod->setOptions(["NameServerIP" => "8.8.8.8", "NameServer" => "dns1"]);
+        $mod->getFromDB("5312");
+
+        $response = $mod->deleteNameServer();
+        $this->assertTrue($response);
+    }
+
+    public function testGetOrderId()
+    {
+        $mod = ModuleFactory::getModule('Domain', 'class.gigasreseller.php');
+        $mod->getFromDB("5312");
+
+        $response = $mod->getOrderId("ndsidsklkds.net");
+        $this->assertInternalType('string', $response);
+    }
+    
+    public function testGetRegistrarLock()
+    {
+        $mod = ModuleFactory::getModule('Domain', 'class.gigasreseller.php');
+        $mod->getFromDB("5312");
+
+        $response = $mod->getRegistrarLock();
+        $this->assertTrue($response);
+    }
+    public function testRegister()
+    {
+        $mod = ModuleFactory::getModule('Domain', 'class.gigasreseller.php');
+        $mod->getFromDB("5312");
+
+        $response = $mod->Register();
+        $this->assertTrue($response);
+    }
+
+}

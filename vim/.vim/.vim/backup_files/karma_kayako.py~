@@ -1,0 +1,159 @@
+#!/usr/bin/env python
+#-*- coding: utf-8 -*-
+import cronbase, sys, ConfigParser
+import settings
+from django.core.mail import send_mail as django_send_mail
+from clients.models import Client, ClientExtraDetail
+from accounts.models import Account, AccountAddon
+try:
+    from itertools import ifilter
+except ImportError:
+    ifilter = filter
+
+email = u''
+
+
+def log(*msg):
+    """ loguea a la salida y al email """
+    global email
+    for m in msg:
+        email += u"\n" + m
+        print m.encode('utf-8')  #sin este encode peta al hacerle un pipe a fichero
+
+
+def get_accounts_info_from_client(client, config):
+    """
+    get accounts info from a given client
+     - client 
+     - config con las keys:
+       - ps_addons names of professional services as list
+       - categories_vps list of category id included in VPS product
+       - categories_dcs list of category id included in datacenter product
+    """
+    config = config.get('products')
+    accounts = list(Account.objects.filter(
+        client_id_id=client,
+        status='Active',
+        product_id__category_id_id__in=config.get('categories_vps') + config.get('categories_dcs')))
+
+    num_dcs = len(filter(lambda a: a.product_id.category_id_id in config.get('categories_dcs'), accounts))
+
+    num_vps = len(filter(lambda a: a.product_id.category_id_id in config.get('categories_vps'), accounts))
+
+    num_pfs = AccountAddon.objects.filter(
+        status='Active',
+        account_id__in=[a.id for a in accounts],
+        addon_id__in=config.get('ps_addons'),).count()
+
+    return dict(
+        num_dcs=num_dcs,
+        num_vps=num_vps,
+        num_pfs=num_pfs,
+    )
+
+
+def calculate_karma(client, config):
+    """ calcula karma de cliente """
+    a_info = get_accounts_info_from_client(client, config)
+    if sum(a_info.values()) == 0:
+        return 0   # client has no accounts at all !
+    elif client.clientextradetail.karma == 5:
+        return 5
+    elif a_info.get('num_pfs') > 0:
+        return 4
+    elif client.clientextradetail.karma == 3:
+        return 3
+    elif a_info.get('num_dcs') > 0 or a_info.get('num_vps') > 9:
+        return 2
+    elif a_info.get('num_vps') > 0:
+        return 1
+    else:
+        return 0
+
+
+def create_clientextradetail(client, config):
+    """ create clientextradetail if neccesary"""
+    try:
+        _ = client.clientextradetail
+    except ClientExtraDetail.DoesNotExist:
+        ClientExtraDetail(
+            karma=0,
+            timezone=1,
+            trusted_payer=0,
+            client=client).save()
+
+
+def read_config():
+    """ read the config """
+    config = ConfigParser.ConfigParser()
+    config.read(__file__.replace('.py', '.cnf'))
+    config = config._sections
+
+    config['products']['categories_vps'] = [int(i) for i in config['products']['categories_vps'].split(',')]
+    config['products']['categories_dcs'] = [int(i) for i in config['products']['categories_dcs'].split(',')]
+    config['products']['ps_addons'] = list(
+        set(settings.PS_ADDON_ID) - set(settings.PS_EXCLUDE_KARMA4)
+    )
+
+    config['KAYAKO_KARMA_IDS'] = settings.KAYAKO_KARMA_IDS
+
+    return config
+
+
+def send_mail(config):
+    """ sends an email """
+    if config['email']['send_mail'] == 'yes':
+        django_send_mail(
+            "Informe de proceso que actualiza el karma de clientes",
+            email,
+            "gigas@gigas.com",
+            config['email']['emails_report'].split(','))
+        return True
+    else:
+        log(u'No email sent.')
+        return False
+
+
+def run_karma_kayako():
+    """ here we go! """
+    config = read_config()
+
+    clients = Client.objects.all() \
+        .exclude(clientdetail__isnull=True) \
+        .exclude(clientdetail__parent_id__gt=0)
+
+    for client in clients:
+        # if extradetail is missing, create it
+        create_clientextradetail(client, config)
+        karma = calculate_karma(client, config)
+        client.clientextradetail.karma = karma
+        client.clientextradetail.save()
+        log(u'Client {u} now has karma {k}'.format(u=client, k=karma))
+
+    users = Client.objects.filter(clientdetail__parent_id__gt=0)
+    for user in users:
+        # parent_id.id.id is WTF ---> will be fixed in #7290
+        iter_r = ifilter((lambda c: c.id == user.clientdetail.parent_id.id.id), clients)
+        try:
+            create_clientextradetail(user, config)
+            user.clientextradetail.karma = iter_r.next().clientextradetail.karma
+            user.clientextradetail.save(update_fields=['karma'])
+            log("#{userid} user {username} now has karma {karma} ".format(
+                karma=user.clientextradetail.karma, 
+                userid=user.id,
+                username=user,))
+        except StopIteration:
+            log("Error trying to assign karma to user #{userid}."
+                "Cannot find client #{clientid}."
+                "Skipping this user.".format(userid=user.id, 
+                                             clientid=user.clientdetail.parent_id.id.id))
+    
+    log(u'We\'re done.')
+
+    if '-v' in sys.argv:
+        log(u'Configuration --> {0}\n'.format(config))
+
+    send_mail(config)
+    
+if __name__ == '__main__':
+    run_karma_kayako()

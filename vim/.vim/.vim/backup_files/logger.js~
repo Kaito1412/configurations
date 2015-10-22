@@ -1,0 +1,35 @@
+'use strict';
+
+var fs = require('fs');
+var config = require('../config');
+
+/**
+  @function log
+  Constuye un filtro para incluir en la cláusula WHERE de SQL según los
+  parámetos enviados
+  @param {string} level - Nombre de la columna a filtrar
+  @param {string} message - Mensaje que mostrará en el log
+  */
+exports.log = function (level, message) {
+  var levels = ['error', 'warn', 'info', 'debug'];
+
+  if (levels.indexOf(level) <= levels.indexOf(config.debugLevel)) {
+    var unitSize = {b: 1, kb: 1024, mb: 1048576, gb: 1073741824};
+    var maxSize = parseInt(config.maxSize.slice(0, -2)) * unitSize[config.maxSize.slice(-2).toLowerCase()];
+    if (fs.existsSync(config.logfile) && fs.statSync(config.logfile).size > maxSize) {
+      for (var i = config.maxFiles; i > 0; i--) {
+        if (fs.existsSync(config.logfile + '.' + i) && i === config.maxFiles) {
+          fs.unlinkSync(config.logfile + '.' + i);
+        }
+        if (i === 1 && !fs.existsSync(config.logfile + '.' + i) && fs.existsSync(config.logfile)) {
+          fs.renameSync(config.logfile, config.logfile + '.' + i);
+        } else if (!fs.existsSync(config.logfile + '.' + i) && fs.existsSync(config.logfile + '.' + (i - 1))) {
+          fs.renameSync(config.logfile + '.' + (i - 1), config.logfile + '.' + i);
+        }
+      }
+    }
+    var nowDate = new Date().toISOString().replace(/T/, ' ').replace(/Z/, '');
+    fs.appendFile(config.logfile, level + ' - ' + nowDate + ' -  ' + message + '\n');
+    console.log(level + ': ' + message);
+  }
+};

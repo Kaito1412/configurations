@@ -1,0 +1,47 @@
+from datetime import timedelta
+import os
+import platform
+
+class OS:
+    
+    @classmethod
+    def name(self):
+        return platform.system()
+
+    @classmethod
+    def distribution(self):
+        return platform.dist()
+
+    @classmethod
+    def architecture(self):
+        return platform.architecture()
+
+    @classmethod
+    def hostname(self):
+        return platform.node()
+
+    @classmethod
+    def kernel(self):
+        return platform.release()
+
+    @classmethod
+    def hostname(self):
+        return platform.node()
+
+    @classmethod
+    def user(self):
+        return os.environ['USER']
+
+    @classmethod
+    def shell(self):
+        return os.environ['SHELL']
+
+    @classmethod
+    def terminal(self):
+        return os.environ['TERM']
+
+    @classmethod
+    def uptime(self):
+        with open('/proc/uptime', 'r') as f:
+           uptime_seconds = float(f.readline().split()[0])
+           return str(timedelta(seconds=uptime_seconds))

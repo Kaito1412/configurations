@@ -1,0 +1,190 @@
+{* MULTICURRENCY *}
+{php}
+require_once "includes/modules/Other/gigasmcp/Multicurrency.php";
+$mu = new Multicurrency();
+foreach($mu->convertUpgrade($this->get_template_vars()) as $k=>$v) $this->assign($k, $v);
+{/php}
+{* END MULTICURRENCY *}
+<section id="thestuff-fw">
+    <div class="tablewrap-full">
+        <h2 class="bbb h2cen">{$lang.serviceupgrade}: {if $lang[$contents.product.product_name]}{$lang[$contents.product.product_name]}{else}{$contents.product.product_name}{/if}</h2>
+        <table>
+                <tr>
+                    <th width="55%" align="left">{$lang.Description}</th>
+                    <th width="25%">{$lang.price}</th>
+                </tr>
+
+           {if $contents.product && $contents.product.product_id != $contents.product.new_product_id}
+                <tr class="srow">
+                    <td valign="top">
+                        {$contents.product.upgrade_name}
+                    </td>
+                    <td><strong>{$contents.product.charge|price:$currency}</strong></td>
+                </tr>
+           {/if}
+
+	{if $contents.config}
+			{foreach from=$contents.config  item=cstom}
+                {* <!-- Vamos a ocultar la config de location que es gratuita -->*}
+                {if $cstom.config_cat_name|stripos:"location" === 0}{continue}{/if}
+                {* <!-- Ocultamos también la config de sistema operativo que tb es gratis -->*}
+                {if $cstom.config_cat_name|stripos:"OS Template" === 0}{continue}{/if}
+                <tr >
+                    <td valign="top" class="blighter fs11" style="padding-left:15px"><b>{if $lang[$cstom.config_cat_name]}{$lang[$cstom.config_cat_name]}{else}{$cstom.config_cat_name}{/if}</b>: 
+                    {if $cstom.new_qty!=$cstom.old_qty}
+                        {if $cstom.config_cat_name == 'number_of_extra_servers'}
+                        {$cstom.old_qty+1} x {if $cstom.old_config_name}{$cstom.old_config_name}{/if} =&gt; {$cstom.new_qty+1} x {if $cstom.new_config_name}{$cstom.new_config_name}{/if}
+                        {else}
+                        {$cstom.old_qty} x {if $cstom.old_config_name}{$cstom.old_config_name}{/if} =&gt; {$cstom.new_qty} x {if $cstom.new_config_name}{$cstom.new_config_name}{/if}
+                        {/if}
+                    {else}
+                        {$cstom.old_config_name} =&gt; {$cstom.new_config_name}
+                    {/if}
+
+                    <br/>
+                    </td>
+                    {if $subtotal.total >= 0 and $credit.total >= 0 and $tax.total >= 0}
+                    <td class="blighter fs11"><strong>{$cstom.charge|price:$currency}</strong></td>
+                    {else}
+                    <td><strong>{0|price:$currency}</strong></td>
+                    {/if}
+                </tr>
+			{/foreach}
+		{/if}
+
+        {if $subtotal.total >= 0 and $credit.total >= 0 and $tax.total >= 0}
+            {if $tax}
+                <tr>
+                    <td >{$lang.subtotal}</td>
+                    <td >{$tax.subtotal|price:$currency}</td>
+                </tr>
+
+                {if $subtotal.coupon}
+                <tr >
+                    <td>{$lang.discount}</td>
+                    <td>
+                        <strong>- {$subtotal.discount|price:$currency}</strong>
+                    </td>
+                </tr>
+                {/if}
+
+                {if $tax.tax1 && $tax.taxed1!=0}
+                <tr>
+                    <td>{$tax.tax1name} @ {$tax.tax1}%  </td>
+                    <td>{$tax.taxed1|price:$currency}</td>
+                </tr>
+               {/if}
+
+               {if $tax.tax2  && $tax.taxed2!=0}
+                <tr >
+                    <td>{$tax.tax2name} @ {$tax.tax2}%  </td>
+                    <td>{$tax.taxed2|price:$currency}</td>
+                </tr>
+               {/if}
+
+               {if $tax.credit!=0}
+                <tr>
+                    <td><strong>{$lang.credit}</strong> </td>
+                    <td><strong>{$tax.credit|price:$currency}</strong></td>
+                </tr>
+               {/if}
+
+            {elseif $credit}
+                {if  $credit.credit!=0}
+                <tr>
+                    <td ><strong>{$lang.credit}</strong> </td>
+                    <td><strong>{$credit.credit|price:$currency}</strong></td>
+                </tr>
+                {/if}
+                
+                <tr>
+                    <td >{$lang.subtotal}</td>
+                    <td>{$subtotal.total|price:$currency}</td>
+                </tr>
+            {else}
+                {if $subtotal.coupon}
+                <tr>
+                    <td>{$lang.discount}</td>
+                    <td>
+                        <strong>- {$subtotal.discount|price:$currency}</strong>
+                    </td>
+                </tr>
+                {/if}                                                               
+                <tr>
+                    <td >{$lang.subtotal}</td>
+                    <td>{$subtotal.total|price:$currency}</td>
+                </tr>
+            {/if}
+        {/if}
+                <tr>
+                    <td>
+                        <div style="float: left">
+                            {if $subtotal.coupon}
+                            {else}
+                            <div>
+                                <a href="#" onclick="$(this).hide();$('#promocode').show();return false;">
+                                    <strong>{$lang.addcoupon}</strong>
+                                </a>
+                            </div>
+                            <div id="promocode" style="display:none;">
+                                <form action="" method="post" id="promoform">
+                                    <input type="hidden" name="addcoupon" value="true" />
+                                    {$lang.usecoupon}: <input type="text" class="i150" name="promocode"/> <input type="submit" value="OK"/>
+                                </form>
+                            </div>
+                            {/if}
+                        </div>
+                        <div style="float: right">
+                            {$lang.total_today}
+                        </div>
+                    </td>
+                    {if $subtotal.total >= 0 and $credit.total >= 0 and $tax.total >= 0}
+                    <td class="green">
+                        {$currency.sign}
+                        {if $tax}
+                            {$tax.total|price:$currency:false}
+		                {elseif $credit}
+                            {$credit.total|price:$currency:false}
+		                {else}
+                            {$subtotal.total|price:$currency:false}
+		                {/if}{$currency.sign}
+                    </td>
+                    {else}
+                    <td class="green">{0|price:$currency}</td>
+                    {/if}
+                </tr>
+        </table>
+    </div>
+  {*<!--
+  {if ($tax && $tax.total<0) || ($credit && $credit.total<0) || ($subtotal.total<0)}
+    <div class="greenbox">{$lang.amountreturned}<b>
+                {if $tax}{$tax.total|abs|price:$currency}
+		{elseif $credit}{$credit.total|abs|price:$currency}
+		{else}{$subtotal.total|abs|price:$currency}
+		{/if}</b>
+    </div>
+  {/if}
+  -->*}
+
+<div class="tablewrap-full" {if $tax && $tax.total<=0}style="display:none"{elseif $credit && $credit.total<=0}style="display:none"{elseif $subtotal.total<=0}style="display:none"{/if}>
+		<h2 class="bbb h2cen">{$lang.choose_payment}</h2>
+<form action="" method="post" onsubmit='$("#checkout").addLoader();' id="payform">
+    <input type="hidden" name="make" value="upgrade" />
+    {*<!--<ul class="chc-pago-line">-->*}
+    {if $gateways}
+        {assign var="gateways_ul_class" value='class="chc-pago-line"'}
+        {include file="gateways.tpl"}
+        {*<!--
+        {foreach from=$gateways item=module key=mid name=payloop}
+            <li><input type="radio" name="gateway" value="{$mid}" {if $submit && $submit.gateway==$mid||$mid==$paygateid}checked="checked"{elseif $smarty.foreach.payloop.first}checked="checked"{/if}/> {$module}</li>
+        {/foreach}
+        -->*}
+    {/if}
+    {*<!--</ul>-->*}
+    
+{securitytoken}</form>
+</div>
+<div id="checkout">
+    <input type="button" value="{$lang.submit}" onclick="$('#payform').submit()"/>
+</div>
+</section>

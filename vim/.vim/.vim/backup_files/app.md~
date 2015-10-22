@@ -1,0 +1,91 @@
+showIP
+======
+
+### Configuración
+
+* Habilitar login
+* Usuario
+* Contraseña
+* Puerto
+* Lista de procesos monitorizables
+
+### Resumen
+
+* Sistema operativo
+* Distribución
+* Kernel
+* Porcentaje CPU
+* USo Memoria (Porcentaje)
+* Disco usado de Disco total (Porcentaje)
+
+### Sistema operativo
+
+* Sistema operativo
+* Distibución
+* Kernel
+* Shell
+* Usuario
+* Hostname
+* Uptime
+
+### CPU
+
+* Fabricante
+* Modelo
+* Número de CPUs
+* Porcentaje usado
+* Hercios de cada una CPU
+* Temperatura
+
+### Procesos
+
+Lista de procesos que se hayan configurado para monitorear
+* Logo
+* Pid
+* Nombre
+* Uso CPU/Memoria
+
+### Memoria
+
+* Memoria total
+* Usada (Porcentaje)
+* Swap (Si hay)
+  * Total
+  * Usada (Porcentaje)
+
+### Discos
+
+Lista de discos y particiones con:
+
+* Ruta Físcica (en el disco o en la red)
+* Ruta de montaje
+* Sistema de ficheros
+* Espacio libre (porcentaje)
+* Total
+
+### Red
+
+* IP pública
+* IP privada
+* Netmask
+* Gateway
+* Interfaces
+* Velocidades
+* Lista de nodos conectados a la red
+
+### Sensores
+
+* Temperatura
+* Humedad
+* Cámara
+  * Streaming (por defecto)
+  * Foto
+  * Video
+
+### Notificaciones
+
+* Temperatura CPU muy alta
+* CPU a tope
+* RAM a tope
+* Poco espacio
+

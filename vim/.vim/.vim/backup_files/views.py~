@@ -1,0 +1,168 @@
+# -*- coding: utf-8 -*-
+from django.contrib.auth.decorators import login_required
+from django.http import HttpResponseRedirect
+from django.contrib import messages
+from orders.models import Order, Coupon
+from accounts.models import Account
+from invoices.models import Invoice
+from clients.models import Client
+from email_template.models import EmailTemplate
+from email_template.utils import get_email_template
+from django.core.mail import send_mail
+from smtplib import SMTPException
+from kayako.models import Kayako
+from django.utils.encoding import smart_str
+from settings import API_BILLING_HOST, API_BILLING_USER, API_BILLING_PASS
+import datetime
+import requests
+import logging
+
+
+@login_required
+def change_status(request, status):
+
+    orders = request.POST.getlist('_selected_action')
+
+    if len(orders) > 1:
+        messages.add_message(request, messages.ERROR, 'No se puede cancelar más de un order a la vez')
+        return HttpResponseRedirect('/admin/orders/order')
+
+    if not status in ['cancelled']:
+        messages.add_message(request, messages.ERROR, 'El nuevo estado del order no es válido')
+        return HttpResponseRedirect('/admin/orders/order')
+
+    status = status.capitalize()
+
+    if status == 'Cancelled':
+        for order_id in orders:
+            order = Order.objects.get(pk=order_id)
+            order_status = order.status
+
+            try:
+                account_status = order.account_set.get().status
+                invoice_status = order.invoice_id.status
+            except Account.DoesNotExist:
+                account_status = ''
+            except Invoice.DoesNotExist:
+                invoice_status = ''
+
+
+            if order_status == 'Pending' and account_status == 'Pending' and invoice_status == 'Unpaid':
+                order.status = 'Cancelled'
+                order.save()
+
+                account = Account.objects.get(pk=order.account_set.get().id)
+                account.status = 'Cancelled'
+                account.save()
+
+                invoice = Invoice.objects.get(pk=order.invoice_id.id)
+                invoice.status = 'Cancelled'
+                invoice.save()
+
+                messages.add_message(request, messages.INFO, 'Order id #%s se ha cancelado correctamente' % order_id)
+
+            else:
+                messages.add_message(request, messages.ERROR, 'Order id #%s no puede ser cancelado porque no cumple los requisitos' % order_id)
+
+    return HttpResponseRedirect('/admin/orders/order')
+
+@login_required
+def resend_coupon(request, coupon_id):
+    template_by_product_list = {"Plesk ( 10 dominios )":"license:plesk10coupon","default":"license:plesk10coupon"}
+    try:
+        c = Coupon.objects.get(pk=coupon_id)
+    except Coupon.DoesNotExist:
+        messages.add_message(request, messages.ERROR, "Cupon %s no encontrado" % coupon_id)
+        return HttpResponseRedirect('/admin/orders/coupon')
+
+    ok = True
+    cond_error = ""
+    #Comprobar que cumple condiciones para reenvio
+    if c.clients != 'existing' or c.client_id == 0:
+        ok = False
+        cond_error = "No hay un unico destinatario. %s %s" % (c.clients, c.client_id)
+    if c.num_usage >= c.max_usage:
+        ok = False
+        cond_error = "Demasiados usos. "
+    if c.expires is not None and c.expires <= datetime.date.today():
+        ok = False
+        cond_error = "Cupon expirado"
+    if not ok:
+        messages.add_message(request, messages.ERROR, "Cupon no cumple los requisitos para poder ser enviado: %s" % cond_error)
+        return HttpResponseRedirect('/admin/orders/coupon')
+
+    # recuperamos el cliente
+    try:
+        cli = Client.objects.get(pk=c.client_id)
+    except Client.DoesNotExist:
+        messages.add_message(request, messages.ERROR, "Cliente %s no encontrado" % c.client_id)
+        return HttpResponseRedirect('/admin/orders/coupon')
+    client_email = cli.email
+    client_name = cli.clientdetail.firstname
+
+    # recuperamos el template a enviar
+    email_tpl_name = template_by_product_list[getattr(template_by_product_list, c.products_list(), "default")]
+
+    try:
+        emtpls = get_email_template(email_tpl_name, cli)
+    except EmailTemplate.DoesNotExist:
+        messages.add_message(request, messages.ERROR, "Template %s no encontrado" % email_tpl_name)
+        return HttpResponseRedirect('/admin/orders/coupon')
+
+    emtpl = emtpls[0]
+   #try:
+   #    send_mail(emtpl.subject, emtpl.message % dict(firstname=client_name,couponcode=c.code), "gigas@gigas.com", [client_email])
+   #except SMTPException, e:
+   #    messages.add_message("Error al enviar el correo a %s: %s" % (client_email, e))
+    kayako = Kayako.objects.all()[0]
+    ticket = kayako.new_ticket(subject=smart_str(emtpl.subject),
+                               fullname="Gigas Support",
+                               email=client_email,
+                               contents=smart_str(emtpl.message % {"firstname":client_name,"couponcode":c.code}),
+                               departmentid="32",
+                               ticketstatusid="24",
+                               ticketpriorityid="2",
+                               tickettypeid="4",
+    )
+    messages.add_message(request, messages.INFO, "Correo enviado a %s" % client_email)
+    #TODO: meter en el coupon log el reenvio
+    return HttpResponseRedirect('/admin/orders/coupon')
+
+
+@login_required
+def activate(request, order_id):
+    # order = Order.objects.get(pk=order_id)
+    try:
+        response = requests.get('{0}/token'.format(API_BILLING_HOST),
+                                auth=(API_BILLING_USER, API_BILLING_PASS))
+    except requests.exceptions.RequestException:
+        logging.exception('API Billing does not response')
+        messages.add_message(request, messages.ERROR,
+                             'API Billing does not response')
+        return HttpResponseRedirect(
+            '/admin/orders/order/{0}/'.format(order_id))
+    if response.status_code != 200:
+        logging.error('Impossible to get token')
+        messages.add_message(request, messages.ERROR,
+                             'Impossible to get token')
+        return HttpResponseRedirect(
+            '/admin/orders/order/{0}/'.format(order_id))
+    token = response.json()['token']
+    try:
+        response = requests.post(
+            '{0}/order/{1}/activate'.format(API_BILLING_HOST, order_id),
+            headers={'Authorization': token})
+        logging.error(response.text)
+    except requests.exceptions.RequestException:
+        messages.add_message(request, messages.ERROR,
+                             'Error trying to activate order')
+        return HttpResponseRedirect(
+            '/admin/orders/order/{0}/'.format(order_id))
+
+    logging.debug(response.text)
+    messages.add_message(
+        request,
+        messages.SUCCESS if response.status_code == 200 else messages.ERROR,
+        'Activated' if response.status_code == 200 else 'Failed Activate')
+
+    return HttpResponseRedirect('/admin/orders/order/{0}/'.format(order_id))

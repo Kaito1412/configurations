@@ -1,0 +1,193 @@
+"""Complete checks for Virtual Machines."""
+
+from api.controllers.checkers.checker import Checker, CheckFailed
+from managers.resource_manager import ResourceManager
+from managers.vm_manager import VirtualMachineManager
+from managers.db_manager import (DiskManager,
+                                 NetworkManager,
+                                 OnappIpAddressManager,
+                                 PackManager,
+                                 TemplateManager,
+                                 HypervisorExtraManager,
+                                 HypervisorTierManager)
+
+from api.controllers.checkers.virtual_machine.mini import (can_allocate_cpus,
+                                                           can_allocate_memory)
+from api.controllers.checkers.storage.mini import (
+    can_allocate_disk_space,
+    can_allocate_on_data_store_group)
+from api.controllers.checkers.network.mini import (can_allocate_ip,
+                                                   can_allocate_ip_on_group)
+from api.controllers.checkers.image.mini import template_satisfies_swap
+from api.controllers.checkers.hypervisor.mini import (
+    can_allocate_on_hypervisor_tier)
+
+
+def check_virtual_machine_resources(console_id, cloud_id, user_id,
+                                    is_admin=False, args=None):
+    """
+    Checks for virtual machine resources,
+    either for creating or editing one.
+    Expected keys in args:
+    - `id`: if present, operation will be considered an edit,
+    otherwise action will be creation
+    - `memory`:
+    - `cpus`:
+    - `primary_disk_size`:
+    - `swap_disk_size`:
+    - `primary_network_id`:
+    - `primary_network_group_id`:
+    - `selected_ip_address_id`:
+    - `data_store_group_primary_id`:
+    - `data_store_group_swap_id`:
+    - `hypervisor_id`:
+    - `hypervisor_tier_id`:
+    - `template_id`:
+    """
+    args = args if args is not None else {}
+    checkit = Checker(console_id, user_id)
+    vmm = VirtualMachineManager(console_id, cloud_id)
+
+    is_edit = "id" in args
+
+    (checkit
+     .add_item(ResourceManager(console_id, cloud_id),
+               "_rmm")
+     .add_item(PackManager(console_id, cloud_id, is_admin),
+               "_pkm"))
+    if is_edit:
+        checkit.add(args['id'], vmm, label="vm")
+
+    if "memory" in args:
+        checkit.filter(can_allocate_memory, memory=args['memory'],
+                       label_vm="vm",
+                       label_resource_manager="_rmm",
+                       error_message="Can't allocate enough memory")
+
+    if "cpus" in args:
+        checkit.filter(can_allocate_cpus, num_cpus=args['cpus'],
+                       cpu_type=args.get('cpu_type'),
+                       label_vm="vm",
+                       label_resource_manager="_rmm",
+                       error_message="Can't allocate enough cpus")
+    total_size = 0
+    disk_manager = DiskManager(console_id, cloud_id)
+    if "primary_disk_size" in args:
+        space = int(args["primary_disk_size"])
+        if is_edit:
+            checkit.add({"virtual_machine_id": args['id'], "primary": 1},
+                        disk_manager, label="primary_disk")
+
+        checkit.filter(can_allocate_disk_space,
+                       space=space,
+                       label_disk="primary_disk",
+                       label_resource_manager="_rmm",
+                       error_message="Can't allocate enough disk space")
+
+        if "data_store_group_primary_id" in args:
+            checkit.filter(can_allocate_on_data_store_group,
+                           target=["_pkm", "_rmm"],
+                           space=space,
+                           group_id=args["data_store_group_primary_id"],
+                           pack_manager_label="_pkm",
+                           resource_manager_label="_rmm",
+                           error_message="Not enough space for primary disk "
+                           "on data store group")
+
+        total_size += space
+
+    if "template_id" in args:
+        checkit.add(args['template_id'],
+                    TemplateManager(console_id, cloud_id, is_admin),
+                    label="template")
+
+    if (is_edit and checkit._items["vm"].operating_system != "windows"
+            and ('template' in checkit._items
+                 and not bool(checkit._items['template'].allowed_swap))):
+        checkit.add({"virtual_machine_id": args['id'], "is_swap": 1},
+                    disk_manager, label="swap_disk")
+
+    if "swap_disk_size" in args:
+        space = int(args["primary_disk_size"])
+        checkit.filter(can_allocate_disk_space,
+                       space=args["swap_disk_size"],
+                       label_disk="swap_disk",
+                       label_resource_manager="_rmm",
+                       error_message="Can't allocate enough disk space "
+                       "for swap")
+        swap_group_id = args.get("data_store_group_swap_id")
+        if swap_group_id:
+            checkit.filter(can_allocate_on_data_store_group,
+                           target=["_pkm", "_rmm"],
+                           space=space,
+                           group_id=args["data_store_group_swap_id"],
+                           pack_manager_label="_pkm",
+                           resource_manager_label="_rmm",
+                           error_message=('Not enough space for swap disk '
+                                          'on data store group'))
+
+        if (total_size > 0 and not is_edit
+                and swap_group_id
+                and swap_group_id == args.get("data_store_group_primary_id")):
+            # in case both goes to the same datastore_group
+            total_size += int(args["swap_disk_size"])
+            checkit.filter(can_allocate_on_data_store_group,
+                           target=["_pkm", "_rmm"],
+                           space=space,
+                           group_id=swap_group_id,
+                           pack_manager_label="_pkm",
+                           resource_manager_label="_rmm",
+                           error_message=('Not enough size '
+                                          'for the whole machine'))
+
+    if "primary_network_id" in args:
+        (checkit
+         .add(args["primary_network_id"],
+              NetworkManager(console_id, cloud_id),
+              label="primary_network_id")
+         .filter(can_allocate_ip,
+                 target="_rmm",
+                 network_id=args["primary_network_id"],
+                 error_message="Primary network not valid"))
+
+    if "primary_network_group_id" in args:
+        checkit.filter(can_allocate_ip_on_group, target="_rmm",
+                       error_message="Network group not found",
+                       group_id=args["primary_network_group_id"])
+
+    if "selected_ip_address_id" in args:
+        checkit.add(args['selected_ip_address_id'],
+                    OnappIpAddressManager(console_id, cloud_id),
+                    label="ip_address")
+
+    if "hypervisor_id" in args:
+        checkit.add({"hypervisor_id": args['hypervisor_id']},
+                    HypervisorExtraManager(console_id, cloud_id, True),
+                    label="hypervisor")
+        if "hypervisor_tier_id" not in args:
+            try:
+                args["hypervisor_tier_id"] = (checkit._items['hypervisor']
+                                              .tiers[0]).id
+            except IndexError:
+                raise CheckFailed("hypervisor {0} without tier"
+                                  .format(args['hypervisor_id']))
+
+    if "hypervisor_tier_id" in args:
+        (checkit
+         .add(args['hypervisor_tier_id'],
+              HypervisorTierManager(console_id, cloud_id, True),
+              label="hypervisor_tier")
+         .filter(can_allocate_on_hypervisor_tier,
+                 resource_manager_label="_rmm",
+                 hypervisor_tier_label="hypervisor_tier",
+                 error_message=("Hypervisor tier #{0} not available"
+                                .format(args["hypervisor_tier_id"]))))
+
+    if "template_id" in args:
+        checkit.filter(template_satisfies_swap,
+                       template_label="template",
+                       swap_disk_label="swap_disk",
+                       swap_disk_size=args.get("swap_disk_size", 0),
+                       error_message="Template requirements not met")
+
+    return checkit.get_resources()

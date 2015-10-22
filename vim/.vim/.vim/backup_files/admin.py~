@@ -1,0 +1,212 @@
+# -*- coding: utf-8 -*-
+import datetime
+from django.contrib import admin
+from django.core.exceptions import PermissionDenied
+from django.contrib import messages
+from django.contrib.auth.decorators import permission_required
+from clients.models import Client, ClientDetail, ClientExtraDetail, ClientSupportNote, ClientMigration, ClientBillingExtra, ClientExtraType
+from clients.forms import ClientExtraDetailInlineForm, ClientBillingExtraForm, ClientExtraDetailForm
+from accounts.models import Account
+from orders.models import Order
+from invoices.models import Invoice
+from main.utils import export_as_csv
+from main.admin import BaseAdmin
+from logs.models import EmailLog
+from daterange_filter.filter import DateRangeFilter
+from .filters import gtzero_filter
+from .utils import karma_is_full
+
+#Inlines
+class EmailLogAdminInline(admin.StackedInline):
+    model = EmailLog
+    fields = ('id', 'subject', 'message', 'date')
+    readonly_fields = ['id', 'subject', 'message', 'date']
+    extra = 0
+    can_delete = False
+    max_num = 0
+
+
+class ClientDetailInline(admin.StackedInline):
+    model = ClientDetail
+    fields = ('id', 'firstname', 'lastname', 'address1', 'city', 'state', 'postcode', 'country', 'phonenumber', 'datecreated', 'language', 'company', 'notes', 'parent', 'privileges')
+    readonly_fields = ['id', 'firstname', 'lastname', 'address1', 'city', 'state', 'postcode', 'country', 'phonenumber', 'datecreated', 'language', 'company', 'notes', 'parent', 'privileges']
+    extra = 0
+    can_delete = False
+    max_num = 0
+
+
+class AccountInline(admin.TabularInline):
+    model = Account
+    fields = ('id', 'order_id', 'product_id', 'date_created', 'domain', 'firstpayment', 'total', 'payment_module', 'billingcycle', 'next_invoice', 'status', 'username')
+    readonly_fields = ['id', 'order_id', 'product_id', 'date_created', 'domain', 'firstpayment', 'total', 'payment_module', 'billingcycle', 'next_invoice', 'status', 'username']
+    extra = 0
+    can_delete = False
+    max_num = 0
+
+
+class OrderInline(admin.TabularInline):
+    model = Order
+    fields = ('id', 'number', 'payment_module', 'invoice_id', 'total', 'date_created', 'status', 'order_ip')
+    readonly_fields = ['id', 'number', 'payment_module', 'invoice_id', 'total', 'date_created', 'status', 'order_ip']
+    extra = 0
+    can_delete = False
+    max_num = 0
+
+class InvoiceInline(admin.TabularInline):
+    model = Invoice
+    fields = ('id', 'status', 'date', 'datepaid', 'subtotal', 'credit', 'taxrate', 'total', 'payment_module')
+    readonly_fields = ['id', 'status', 'date', 'datepaid', 'subtotal', 'credit', 'taxrate', 'total', 'payment_module']
+    extra = 0
+    can_delete = False
+    max_num = 0
+
+class ClientFieldAdmin(BaseAdmin):
+#    list_display = ('code', 'name', 'field_type', 'default_value', 'field_type', 'options')
+    fields = ('code', 'name', 'field_type', 'default_value', 'field_type', 'options')
+
+class ClientExtraDetailInline(admin.TabularInline):
+    model = ClientExtraDetail
+    fields = ('karma', 'extratype')
+    readonly_fields = ['extratype']
+    extra = 1
+    form = ClientExtraDetailInlineForm
+    can_delete = False
+    max_num = 0
+
+class ClientSupportNoteInline(admin.StackedInline):
+    model = ClientSupportNote
+    extra = 0
+    list_display = ('type', 'content')
+    readonly_fields = ['type', 'content']
+    can_delete = False
+    max_num = 0
+
+
+class ClientSupportNoteAdmin(BaseAdmin):
+    list_display = ['id', 'client_link', 'type', 'content']
+
+    def country_filter(self, queryset, countries):
+        return queryset.filter(client__clientdetail__country__in=countries)
+
+
+class ClientAdmin(BaseAdmin):
+    list_display = ('id', 'fullname', 'karma',
+            'get_company', 'phone', 'email', 'ip',
+            'lastlogin', 'status', 'country', 'doc_number', 'tax_exemp',
+            'is_maxmind_fraud', 'is_dni_fraud', 'credit', 'extratypes',
+            'datecreated', 'get_client_support_notes', 'url_add_client_support_notes',
+            'twitter_link', 'karma', 'income', 'currency', 'parent_link')
+    inlines = [ClientDetailInline, ClientExtraDetailInline, ClientSupportNoteInline, AccountInline, OrderInline, InvoiceInline, EmailLogAdminInline]
+    readonly_fields = ['lastlogin', 'ip', 'host', 'password', 'email', 'status']
+    list_filter = ['status', 'fraud__type', 'fraud__check_result',
+                   'clientdetail__country', 'clientextradetail__karma', 'clientextradetail__extratype__extratype']
+    fields = ('email', 'lastlogin', 'status')
+    search_fields = ['email', 'clientdetail__firstname', 'clientdetail__lastname', 'id', 'clientdetail__country', 'ip']
+    actions = ['export_as_csv']
+    export_exclude_fields = ['twitter_link']
+
+    def country_filter(self, queryset, countries):
+        return queryset.filter(clientdetail__country__in=countries)
+
+    def export_as_csv(self, request, queryset):
+        """
+        Generic csv export admin action.
+        """
+        if not request.user.is_staff:
+            raise PermissionDenied
+
+        opts = self.model._meta
+
+        extra = ['fullname', 'get_company', 'phone', 'country', 'doc_number',
+                 'tax_exemp', 'is_maxmind_fraud', 'is_dni_fraud', 'credit',
+                 'extratypes', 'datecreated', 'twitter',
+                 'income', 'currency', 'parent_id', 'karma']
+
+        if request.user.has_perm('client.can_change'):
+            extra.append('notes')
+        else:
+            extra = ['fullname', 'get_company', 'phone', 'country', 'datecreated']
+
+        return export_as_csv(opts, queryset, extra)
+
+    export_as_csv.short_description = "Export selected objects as csv file"
+
+    def queryset(self, request):
+        queryset = super(ClientAdmin, self).queryset(request)
+        getreq = request.GET.copy()
+        clients = Client.objects.clients_join_values()
+
+        clients_out = []
+        if 'q' in getreq:
+            q_doc_number = getreq.pop('q')[0]
+
+            if q_doc_number != '':
+                for client in clients:
+                    if client[1] == q_doc_number:
+                        clients_out.append(client[0])
+                if len(clients_out) > 0:
+                    new_clients = queryset.filter(id__in=clients_out)
+                    request.GET = getreq
+                    return new_clients
+
+        return queryset
+
+
+class ClientMigrationAdmin(BaseAdmin):
+    list_display = ('id', 'name', 'client_link', 'client_email_link',
+                    'contact_email', 'date_start', 'date_end', 'notes')
+
+    def country_filter(self, queryset, countries):
+        return queryset.filter(client__clientdetail__country__in=countries)
+
+
+class ClientExtraDetailAdmin(BaseAdmin):
+    list_display = ('client', 'karma', 'has_adhoc', 'trusted_payer', 'adyen_expiry_date')
+    form = ClientExtraDetailForm
+    readonly_fields = []
+    list_filter = (
+        ('adyen_expiry_date', DateRangeFilter),
+        gtzero_filter('karma', 'karma'),
+        'trusted_payer',
+    )
+    search_fields = ('client__email',)
+    date_hierarchy = 'adyen_expiry_date'
+
+    def get_form(self, request, obj=None, **kwargs):
+        """ necesitamos anadirle el usuario """
+        form = super(ClientExtraDetailAdmin, self).get_form(request, obj, **kwargs)
+        form.current_user = request.user
+        return form
+
+    def save_model(self, request, obj, form, change):
+        karma = obj.karma
+        if 'karma' in form.changed_data and karma in [3, 5] and karma_is_full(karma):
+            messages.error(request, "Lo sentimos pero ha superado el límite máximo de clientes que pueden tener este karma.")
+        super(ClientExtraDetailAdmin, self).save_model(request, obj, form, change)
+
+    def country_filter(self, queryset, countries):
+        return queryset.filter(client__clientdetail__country__in=countries)
+
+
+class ClientBillingExtraAdmin(BaseAdmin):
+    form = ClientBillingExtraForm
+    list_display = ('id', 'client_email_link', 'client_id_link', 'direct_debit', 'ccc', 'mandate')
+    #list_editable = ('direct_debit', 'ccc')
+    list_filter = ('direct_debit', )
+    search_fields = ('client__id', 'client__email')
+    export_extra_fields = ['client__id']
+    export_exclude_fields = ['client']
+
+    def country_filter(self, queryset, countries):
+        return queryset.filter(client__clientdetail__country__in=countries)
+
+
+class ClientExtraTypeAdmin(BaseAdmin):
+    pass
+
+admin.site.register(Client, ClientAdmin)
+admin.site.register(ClientSupportNote, ClientSupportNoteAdmin)
+admin.site.register(ClientMigration, ClientMigrationAdmin)
+admin.site.register(ClientExtraDetail, ClientExtraDetailAdmin)
+admin.site.register(ClientBillingExtra, ClientBillingExtraAdmin)
+admin.site.register(ClientExtraType, ClientExtraTypeAdmin)

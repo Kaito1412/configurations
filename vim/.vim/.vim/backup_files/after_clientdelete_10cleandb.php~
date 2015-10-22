@@ -1,0 +1,18 @@
+<?php
+
+file_put_contents('/tmp/PRUEBAAAAA.txt', $details['id'], true);
+
+$db = Engine::singleton()->getObject('db');
+
+$query = $db->prepare("DELETE FROM gigas_client_extradetails WHERE client_id = ?");
+$query->execute([$details['id']]);
+
+$query = $db->prepare("DELETE FROM gigas_client_support_notes WHERE client_id = ?");
+$query->execute([$details['id']]);
+
+$query = $db->prepare("DELETE FROM gigas_client_migrations WHERE client_id = ?");
+$query->execute([$details['id']]);
+
+$query = $db->prepare("DELETE FROM gigas_client_billing_extra WHERE client_id = ?");
+$query->execute([$details['id']]);
+$query->closeCursor();

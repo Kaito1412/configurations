@@ -1,0 +1,514 @@
+<?php
+
+
+class GigasApiException extends Exception
+{
+    public $content;
+    public $http_code;
+
+    public function __construct($message = '', $code = 0, Exception $previous = null)
+    {
+        $this->content = empty($message) ? "Unknown error" : $message;
+        $this->http_code = empty($code) ? 500 : $code;
+        parent::__construct($message, $code, $previous);
+    }
+
+    public function json()
+    {
+        return json_decode($this->getMessage(), true);
+    }
+}
+
+
+class GigasApiResponse
+{
+    public $content;
+    public $http_code;
+
+    public function __construct($content, $http_code)
+    {
+        $this->content = $content;
+        $this->http_code = $http_code;
+    }
+
+    public function __toString()
+    {
+        return $this->content;
+    }
+
+    public function json()
+    {
+        return json_decode($this->content, true);
+    }
+}
+
+
+class GigasApi
+{
+    public $login;
+    public $password;
+    public $token;
+    public $token_expires;
+    public $is_admin;
+
+    public function __construct($connection)
+    {
+        $this->api_user_id = null;
+        $this->cloud_id = null;
+
+        if (!empty($connection['extra_details']['option100'])) {
+            $this->is_admin = false;
+            $this->login = $connection['extra_details']['option100'];
+            $this->password = $connection['extra_details']['option101'];
+        } else {
+            $this->is_admin = !array_key_exists('order_id', $connection);
+            $this->login = $connection['username'];
+            $this->password = $connection['password'];
+
+        }
+
+        if (empty($connection['host']) and !empty($connection['server_id'])) {
+            $hapi = new GApiWrapper();
+            $server = $hapi->getServerDetails(array('id'=>$connection['server_id']));
+            $connection['host'] = $server['server']['host'];
+            $connection['secure'] = $server['server']['secure'];
+        }
+
+        $this->base_url = (($connection['secure'] == 0) ? 'http' : 'https') . '://' . $connection['host'];
+    }
+
+    public function set_api_user_id($api_user_id = null)
+    {
+        $this->api_user_id = $api_user_id;
+    }
+
+    public function set_cloud_id($cloud_id = null)
+    {
+        $this->cloud_id = $cloud_id;
+    }
+
+    private function request($url, $method = 'GET', $data = array(), $params = array(), $get_token = true)
+    {
+        if ($get_token) {
+            $this->get_token();
+        }
+
+        $ch = curl_init();
+        if (!empty($params)) {
+            $url .= (strpos($url, '?') !== false?'&':'?') . http_build_query($params);
+        }
+        curl_setopt($ch, CURLOPT_URL, $this->base_url . $url);
+        if ($method != 'GET') {
+            curl_setopt($ch, CURLOPT_POST, 1);
+            curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $method);
+        }
+        if (!empty($data)) {
+            $query_data = preg_replace('/%5B(?:[0-9]|[1-9][0-9]+)%5D=/', '=', http_build_query($data));
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $query_data);
+        }
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        $headers = array('Authorization: Gigas token=' . $this->token);
+        if (!empty($this->api_user_id)) {
+            $headers[] = "api_user_id: $this->api_user_id";
+        } elseif (!empty($this->cloud_id)) {
+            $headers[] = "cloud_id: $this->cloud_id";
+        }
+        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+        $result = curl_exec($ch);
+        $http_code = intval(curl_getinfo($ch, CURLINFO_HTTP_CODE));
+
+        if ($http_code >= 400) {
+            throw new GigasApiException($result, $http_code);
+        }
+        
+        file_put_contents("/tmp/put2", $http_code, FILE_APPEND);
+        return new GigasApiResponse($result, $http_code);
+    }
+
+    public function get_token($force = false)
+    {
+        if ($force or empty($this->token)) {
+            try {
+                $t = $this->request('/token', 'GET', array(), array('user' => $this->login, 'password' => $this->password), false)->json();
+            } catch (Exception $e) {
+
+                if ($e->http_code == 404) {
+                    try {
+                        $t = $this->request('/token', 'POST', array('user' => $this->login, 'password' => $this->password), null, false)->json();
+                    } catch (Exception $e) {
+                        #$this->token = null;
+                        throw new GigasApiException("{}", 401);
+                    }
+                } else {
+                    #$this->token = null;
+                    throw new GigasApiException("{}", 401);
+                }
+            }
+            $this->token = $t['token'];
+        }
+
+        return $this->token;
+    }
+
+    public function post($url, $data = array(), $params = array())
+    {
+        return $this->request($url, 'POST', $data, $params);
+    }
+
+    public function get($url, $params = array())
+    {
+        return $this->request($url, 'GET', $data = array(), $params);
+    }
+
+    public function put($url, $data = array(), $params = array())
+    {
+        return $this->request($url, 'PUT', $data, $params);
+    }
+
+    public function delete($url, $data = array(), $params = array())
+    {
+        return $this->request($url, 'DELETE');
+    }
+
+    public function create_user($login, $password, $email, $first_name, $last_name, $cloud_login = null, $cloud_password = null, $role = null)
+    {
+        $params = array(
+            'email' => $email,
+            'first_name' => $first_name,
+            'last_name' => $last_name,
+            'login' => $login,
+            'password' => $password,
+        );
+
+        if (!empty($cloud_login) and !empty($cloud_password)) {
+            $params['cloud_login'] = $cloud_login;
+            $params['cloud_password'] = $cloud_password;
+        }
+
+        if (!empty($role)) {
+            $params['role'] = $role;
+        }
+
+        $r = $this->post('/api_user', $params);
+        $api_user = $r->json();
+
+        if ($api_user['status'] == 'Active') {
+            return $r;
+        } else {
+            throw new GigasApiException("{}", 500);
+        }
+    }
+
+    public function mapp_user($login, $password, $cloud_login, $cloud_password, $role = null)
+    {
+        $params = array(
+            'login' => $login,
+            'password' => $password,
+            'cloud_login' => $cloud_login,
+            'cloud_password' => $cloud_password,
+        );
+
+        if (!empty($role)) {
+            $params['role'] = $role;
+        }
+
+        $r = $this->post('/api_user/map', $params);
+        $api_user = $r->json();
+
+        if ($api_user['status'] == 'Active') {
+            return $r;
+        } else {
+            throw new GigasApiException("{}", 500);
+        }
+    }
+
+    #private function get_full_user($user)
+    #{
+    #    try {
+    #        $r = $this->get('/api_users', array('login' => $user['login']));
+    #    } catch (Exception $r) {
+    #    }
+    #    return ($r->http_code == 200 and count($r->json()) > 0) ? array_merge($user, $r->json()[0]) : $user;
+    #}
+
+    public function get_resources($resource_type = null)
+    {
+        $resources = array();
+        $params = !empty($resource_type)?array('resource_type' => $resource_type):array();
+        try {
+            if (!empty($this->api_user_id)) {
+                $used_resources = $this->get('/api_user/' . $this->api_user_id . '/used_resources', $params)->json();
+                $base_resources = $this->get('/api_user/' . $this->api_user_id . '/base_resources', $params)->json();
+            } else {
+                $used_resources = $this->get('/used_resources', $params)->json();
+                $base_resources = $this->get('/base_resources', $params)->json();
+            }
+        } catch (Exception $e) {
+            return $resources;
+        }
+
+        foreach ($base_resources as $resource) {
+            $used_resource = array_pop(
+                array_filter($used_resources, function ($used_resource) use ($resource) {
+                    return ($used_resource['resource_type'] == $resource['resource_type'] and ($used_resource['group_id'] == $resource['group_id'] or empty($resource['group_id'])));
+                })
+            );
+
+            if (strpos($resource['resource_type'], 'Group') !== false or strpos($resource['resource_type'], 'Tier') !== false) {
+                $resources[$resource['resource_type']][$resource['group_id']] = array(
+                    'group_label' => $resource['group_label'],
+                    'group_id' => $resource['group_id'],
+                    'limit'     => $resource['limit'],
+                    'used'      => $used_resource['use']
+                );
+            } else {
+                $resources[$resource['resource_type']] = array(
+                    'limit' => $resource['limit'],
+                    'used'  => $used_resource['use']
+                );
+            }
+        }
+
+        return $resources;
+    }
+
+    public function get_remaining_resources($resource_type = null)
+    {
+        $remaining_resources = array();
+        try {
+            $resources = $this->get_resources($resource_type);
+        } catch (Exception $e) {
+            return $remaining_resources;
+        }
+
+        $remaining_resources['vm'] = max($resources['VmLimit']['limit'] - $resources['VmLimit']['used'], 0);
+        $remaining_resources['memory'] = max($resources['Memory']['limit'] - $resources['Memory']['used'], 0);
+        if (!empty($resources['IntelCpu']) && !empty($resources['AmdCpu'])) {
+            $remaining_resources['cpu'] = max($resources['AmdCpu']['limit'] - $resources['AmdCpu']['used'], 0);
+            $remaining_resources['cpu_intel'] = max($resources['IntelCpu']['limit'] - $resources['IntelCpu']['used'], 0);
+        } else {
+            $remaining_resources['cpu'] = max($resources['Cpu']['limit'] - $resources['Cpu']['used'], 0);
+            $remaining_resources['cpu_intel'] = 0;
+        }
+
+        if (array_key_exists('DataStoreGroup', $resources)) {
+            $disk_max = 0;
+            $disk_total = 0;
+            $std_disk_max = 0;
+            $std_disk_total = 0;
+            foreach ($resources['DataStoreGroup'] as $data_store_group) {
+                if ($data_store_group['group_id'] == HP_DS_TIER_ID) {
+                    $disk_total += $data_store_group['limit'];
+                    $disk_max += max($data_store_group['limit'] - $data_store_group['used'], 0);
+                } else {
+                    $std_disk_total += $data_store_group['limit'];
+                    $std_disk_max += max($data_store_group['limit'] - $data_store_group['used'], 0);
+                }
+            }
+            $remaining_resources['disk'] = $disk_max;
+            $remaining_resources['disk_total'] = $disk_total;
+            $remaining_resources['disk_std'] = $std_disk_max;
+            $remaining_resources['disk_std_total'] = $std_disk_total;
+        } else {
+            $remaining_resources['disk'] = max($resources['DiskSize']['limit'] - $resources['DiskSize']['used'], 0);
+            $remaining_resources['disk_total'] = $resources['DiskSize']['limit'];
+            $remaining_resources['disk_std'] = 0;
+            $remaining_resources['disk_std_total'] = 0;
+        }
+
+        return $remaining_resources;
+    }
+
+    public function get_disk_resources() {
+        try {
+            $resources = $this->get_resources('DataStoreGroup');
+        } catch (Exception $e) {
+            hbm_log_error('An error occurred while trying to access client resources');
+            throw new Exception('An error occurred while trying to access client resources');
+        }
+
+        if (empty($resources)) {
+            try {
+                // HP_DS_TIER_ID is the default disk tier
+                $resources = $this->get_resources('DiskSize');
+                $resources['group_id'] = HP_DS_TIER_ID;
+            } catch (Exception $e) {
+                hbm_log_error('An error occurred while trying to access client resources');
+                throw new Exception('An error occurred while trying to access client resources');
+            }
+        }
+
+        return $resources;
+    }
+
+    public function get_templates($params = array())
+    {
+        try {
+            return $this->get('/templates', $params)->json();
+        } catch (Exception $e) {
+            return array();
+        }
+    }
+
+    private function get_vm_extended_info($vm)
+    {
+        try {
+            $vm_disks = $this->get('/virtual_machine/' . $vm['id'] . '/disks')->json();
+            $disks_size = array_sum(array_map(function ($vm_disk) {
+                return $vm_disk['disk_size'];
+            }, $vm_disks));
+            $vm['disk'] = $disks_size;
+
+            try {
+                $vm_ips_simple_list = array();
+                $network_interfaces = $this->get('/virtual_machine/' . $vm['id'] . '/network_interfaces')->json();
+                foreach ($network_interfaces as $interface) {
+                    $iface_ips = $this->get('/ip_addresses', array('interface_id' => $interface['id']))->json();
+                    $vm_ips_simple_list = array_merge($vm_ips_simple_list, array_map(function ($vm_ip) {
+                       return $vm_ip['address'];
+                    }, $iface_ips));
+                }
+                $vm['ip'] = $vm_ips_simple_list;
+            } catch (Exception $e) {
+                $vm['ip'] == 'not found';
+            }
+        } catch (Exception $e) {
+        }
+
+        return $vm;
+    }
+
+    public function get_full_virtual_machines($cloud_id=null)
+    {
+        try {
+            if (!empty($cloud_id)) {
+                $vms = $this->get('/virtual_machines', array('cloud_id' => $cloud_id))->json();
+            } else {
+                $vms = $this->get('/virtual_machines')->json();
+            }
+            return array_map(function ($vm) {
+                return $this->get_vm_extended_info($vm);
+            }, $vms);
+        } catch (Exception $e) {
+            return array();
+        }
+    }
+
+    public function get_full_virtual_machine($id)
+    {
+        try {
+            $vm = $this->get('/virtual_machine/' . $id)->json();
+            return $this->get_vm_extended_info($vm);
+        } catch (Exception $e) {
+            return array();
+        }
+    }
+
+    public function get_console($vm)
+    {
+        $vnc_console = "";
+
+        try {
+            $console = $this->get('/virtual_machine/' . $vm['id'] . '/remote_console');
+        } catch (Exception $console) {
+        }
+
+        if ($console->http_code == 200) {
+            $console = $console->json();
+
+            if (strpos($console['url'], '/ovm/') !== false) {
+                $vnc_console = "https://${console['ip']}:${console['port']}${console['url']}";
+            } else {
+                $vnc_console = <<<EOF
+    <div class='onapp_console' style='text-align:center'>
+        <applet archive='https://${console['ip']}/vnc.jar' codebase='https://${console['ip']}/vnc.jar' code='VncViewer.class' height='100%' width='100%'>
+            <param name='PORT' value='${console['port']}' />
+            <param name='REMOTEKEY' value='${console['remote_key']}' />
+            <param name='REMOTE KEY' value='${console['remote_key']}' />
+            <param name='REMOTE_KEY' value='${console['remote_key']}' />
+            <param name='PASSWORD' value='${vm['remote_access_password']}' />
+            <PARAM NAME=\"Scaling factor\" VALUE=87>
+        </applet>
+    </div>
+EOF;
+            }
+        }
+        return $vnc_console;
+    }
+
+    public function gen_network_label($client_id, $vlan_id=null)
+    {
+        $partial_label = "private_network_$client_id";
+        if (!empty($vlan_id)) {
+            return $partial_label . "_$vlan_id";
+        } else {
+            return $partial_label . '_incomplete_' . uniqid();
+        }
+    }
+
+    public function gen_network_group_label($client_id, $vlan_id=null)
+    {
+        $partial_label = "private_network_zone_$client_id";
+        if (!empty($vlan_id)) {
+            return $partial_label . "_$vlan_id";
+        } else {
+            return $partial_label . '_incomplete_' . uniqid();
+        }
+    }
+
+    public function create_network($client_id, $vlan_id=null)
+    {
+        if (!empty($vlan_id)) {
+            $network_group_label = $this->gen_network_group_label($client_id, $vlan_id);
+            $network_label = $this->gen_network_label($client_id, $vlan_id);
+            $networks = $this->get('/networks', array('vlan' => $vlan_id))->json();
+            if (is_array($networks) && !empty($networks)) {
+                $network = $networks[0];
+            } else {
+                $network_groups = $this->get('/network_groups', array('label' => $network_group_label))->json();
+                if (is_array($network_groups) && !empty($network_groups)) {
+                    $network_group = $network_groups[0];
+                } else {
+                    $network_group = $this->post('/network_group', array('label' => $network_group_label))->json();
+                }
+                $network_params = array(
+                    'label' => $network_label,
+                    'network_group_id' => $network_group['id'],
+                    'vlan' => $vlan_id,
+                );
+                $network = $this->post('/network', $network_params)->json();
+            }
+        } else {
+            $tmp_network_group_label = $this->gen_network_group_label($client_id);
+            $tmp_network_label = $this->gen_network_label($client_id);
+            $network_group = $this->post('/network_group', array('label' => $tmp_network_group_label))->json();
+            $network_params = array(
+                'label' => $tmp_network_label,
+                'public' => 0,
+                'network_group_id' => $network_group['id'],
+            );
+            $network = $this->post('/network', $network_params)->json();
+            $network_group_label = $this->gen_network_group_label($client_id, $network['vlan']);
+            $network_label = $this->gen_network_label($client_id, $network['vlan']);
+            $this->put('/network_group/' . $network_group['id'], array('label' => $network_group_label));
+            $this->put('/network/' . $network['id'], array('label' => $network_label));
+        }
+        return $network;
+    }
+
+    public function create_network_permissions($network_group_id, $api_user_id, $limit, $limit_rate)
+    {
+        $multi_resource_params = array(
+            'network_group_limit' => $limit,
+            'network_group_limit_rate' => $limit_rate,
+            'network_group_id' => $network_group_id,
+        );
+        try {
+            $r = $this->put('/api_user/' . $api_user_id . '/multi_base_resource', $multi_resource_params);
+        } catch (Exception $r) {
+            hbm_log_error(
+                "Permission on network group $network_group_id to api user $api_user_id could not be created"
+            );
+        }
+    }
+}

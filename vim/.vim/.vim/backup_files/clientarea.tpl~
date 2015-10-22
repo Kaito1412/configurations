@@ -1,0 +1,538 @@
+{php}$this->assign('globals', $GLOBALS);{/php}
+{* <!-- NOT WORKING !!!!
+<script type="text/javascript" src="{$template_dir}js/states.js"></script>
+<script type="text/javascript" src="{$template_dir}js/states_resellerclub.js"></script>
+--> *}
+<!--[if lte IE 8]>
+<script type="text/javascript" src="{$template_dir}js/ie8_comboxsfix.js"></script>
+<![endif]-->
+
+{php}
+$eu_countries = array('ES','AT','BE','BG','HR','CY','CZ','DK','EE','FI','FR','GE','GR','HU','IE','IT','LV','LT','LU','MT','NL','PL','PT','RO','SK','SI','SE','UK');
+$european = in_array($_SESSION['AppSettings']['login']['country'], $eu_countries);
+$this->assign('european', $european);
+$clientdata = $this->get_template_vars('clientdata');
+if ($clientdata["contact_id"]) {
+    $this->assign('passwordURL', 'profilepassword');
+} else {
+    $this->assign('passwordURL', 'password');
+}
+{/php}
+
+
+<section id="thestuff">
+
+    {if $action=='details'}{* <!-- Shows client details --> *}
+    <div class="tab-wrap">
+        <div class="tabs">
+            <ul>
+                <li><a {if $action=='details' } class="active" {/if} href="{$ca_url}clientarea/details/">{$lang.mydetails}</a></li>
+                <li><a {if $action=='password' } class="active" {/if} href="{$ca_url}clientarea/{$passwordURL}/">{$lang.changepass}</a></li>
+               {if $european}
+                <li><a {if $action=='sepa' } class="active" {/if} href="{$ca_url}clientarea/sepa/">{$lang.section_sepa}</a></li>
+               {/if}
+                {* <!-- {if $enableCCards}<li><a {if $action=='ccard' } class="active" {/if} href="{$ca_url}clientarea/ccard/">{$lang.ccard}</a></li>{/if} --> *}
+            </ul>
+            <div class="formwrap fw2">
+                <form action='' method='post' class="ts">
+                    <input type="hidden" name="make" value="details" />
+                    <div class="tstitle">
+                        <h3>{$lang.details}</h3>
+                    </div>
+                    <p class="profile-info">{$lang.profile_info}</p>
+                    {foreach from=$fields item=field name=floop key=k}
+                        {if $field.field_type=='Password'}{continue}{/if}
+                    <div
+                        {if $field.type=='Company' && $fields.type} style="{if !$client.company || $client.type=='Private'}display:none{/if}"
+                        {elseif $field.type=='Private' && $fields.type} style="{if $client.company=='1'}display:none{/if}"
+                        {/if}>
+                        {if $k !== 'taxexemp'}
+                        <label class="account-info">
+                            {if $k=='type'}
+                                {$lang.clacctype}
+                            {elseif $field.options & 1}
+                                {if $lang[$k]}{$lang[$k]}{else}{$field.name}{/if}
+                            {else}
+                                {$field.name}
+                            {/if}
+                            {if $field.options & 2}<span class="req">*</span>{/if}
+                        </label>
+                        {/if}
+                        {if $k=='type'}
+                        <select name="type" style="display:none;">
+                            <option value="Private" {if $client.company=='0'}selected="selected"{/if}>{$lang.Private}</option>
+                            <option value="Company" {if $client.company=='1'}selected="selected"{/if}>{$lang.Company}</option>
+                        </select>
+                            {if $client.company=='0'}
+                        <input type="text" disabled value="{$lang.Private}"/>
+                            {else}
+                        <input type="text" disabled value="{$lang.Company}"/>
+                            {/if}
+                        {elseif $k=='country'}
+                            {if !($field.options & 8)}
+                                {foreach from=$countries key=k item=v}
+                                    {if $k==$client.country}<input type="text" disabled value="{$v}"/>{/if}
+                                {/foreach}
+                            {else}
+                        <select name="country">
+                                {foreach from=$countries key=k item=v}
+                            <option value="{$k}" {if $k==$client.country  || (!$client.country && $k==$defaultCountry)} selected="selected"{/if}>{$v}</option>
+                                {/foreach}
+                        </select>
+                            {/if}
+                        {else}
+                            {if !($field.options & 8)}
+                                {if $field.field_type=='Password'}
+                                {elseif $field.field_type=='Check'}
+                                    {foreach from=$field.default_value item=fa}
+                                        {if in_array($fa,$client[$k])}{$fa}<br/>{/if}
+                                    {/foreach}
+
+                                {else}
+                        <input type="text" value="{$client[$k]}" disabled /> <input type="hidden" value="{$client[$k]}" name="{$k}"/>
+                                {/if}
+                            {else}
+                                {if $field.field_type=='Input'}
+                                    {if $k!='email' && $k != 'firstname' && $k != 'lastname' && $k != 'my-company'}
+                        <input type="text" value="{$client[$k]}" name="{$k}" class="styled"/>
+                                    {else}
+                        <input type="text" value="{$client[$k]}" class="styled" disabled/>
+                        <input type="hidden" value="{$client[$k]}" name="{$k}"/>
+                                    {/if}
+                                {elseif $field.field_type=='Password'}
+                                {elseif $field.field_type=='Select'}
+                        <select name="{$k}" >
+                                    {foreach from=$field.default_value item=fa}
+                            <option {if $client[$k]==$fa}selected="selected"{/if}>{$fa}</option>
+                                    {/foreach}
+                        </select>
+                                {elseif $field.field_type=='Check'}
+                                    {foreach from=$field.default_value item=fa}
+                        <input type="checkbox" name="{$k}[{$fa}]" value="1" {if in_array($fa,$client[$k])}checked="checked"{/if} />{$fa}<br />
+                                    {/foreach}
+                                {/if}
+                            {/if}
+                        {/if}
+                    </div>
+
+                    {/foreach}
+                    <div>
+                        <input type="submit" value="{$lang.savechanges}" onclick="$('input[name=email]').removeAttr('disabled');"/>
+                    </div>
+                    {securitytoken}</form>
+            </div><!--formwrap-->
+        </div><!--tabs-->
+    </div><!--tab-wrap-->
+
+    {elseif $action=='password' or $action=='profilepassword'}
+        {php}
+            $this->assign("is_contact", array_key_exists('contact_id', $_SESSION['AppSettings']['login']));
+        {/php}
+    <script src="{$template_dir}js/password_strength_plugin.js"></script>
+    <script>{literal}
+	$(function() {
+		//Password strength
+		$passS = $("#pass").passStrength({userid: "#oldpass"});
+		$.fn.shortPass = 'Muy corta';
+		$.fn.badPass = 'Débil';
+		$.fn.goodPass = 'Buena';
+		$.fn.strongPass = 'Muy buena';
+		$.fn.samePassword = 'La antigua contraseña y la nueva son idénticas';
+	});
+	{/literal}</script>
+    <div class="tab-wrap">
+        <div class="tabs">
+            <ul>
+                <li><a {if $action=='details' } class="active" {/if} href="{$ca_url}clientarea/details/">{$lang.mydetails}</a></li>
+                <li><a {if $action=='password' } class="active" {/if} href="{$ca_url}clientarea/{$passwordURL}/">{$lang.changepass}</a></li>
+                {if $european}
+                <li><a {if $action=='sepa' } class="active" {/if} href="{$ca_url}clientarea/sepa/">{$lang.section_sepa}</a></li>
+                {/if}
+                {* <!-- {if $enableCCards}<li><a {if $action=='ccard' } class="active" {/if} href="{$ca_url}clientarea/ccard/">{$lang.ccard}</a></li>{/if} --> *}
+            </ul>
+            <div class="formwrap fw2 fw3">
+                {if $is_contact}
+                <form action='?cmd=gigasrol&action=change_password' method='post' class="ts">
+                    <input type="hidden" name="make" value="changeprofilepassword" />
+                {else}
+                <form action='' method='post' class="ts">
+                    <input type="hidden" name="make" value="changepassword" />
+                {/if}
+                    <div class="tstitle">
+                        <h3>{$lang.passtitle}</h3>
+                    </div>
+                    <div>
+                        <p class="tsp">{$lang.pass_info1} </p>
+                        <p class="tsp">{$lang.pass_info2}</p>
+                        <p class="tsp">{$lang.pass_info3}</p>
+                    </div>
+                    <div>
+                        <label>{$lang.oldpass}</label>
+                        <input name="oldpassword" type="password" id="oldpass"/>
+                    </div>
+                    <div class="new-pass-account">
+                        <label>{$lang.newpassword}:</label>
+                        <input name="password" type="password" id="pass"/>
+
+
+
+
+                    </div>
+                    <div class="NewPassVer">
+                        <label>{$lang.confirmpassword}:</label>
+                        <input name="password2" type="password" id="pass2"/>
+                    </div>
+                    <div>
+                        <input type="submit" value="{$lang.savechanges}"/>
+                    </div>
+                    {securitytoken}</form>
+            </div><!--formwrap-->
+        </div><!--tabs-->
+    </div><!--tab-wrap-->
+<!--Nuevo apartado de Domiciliacion bancaria-->
+ {elseif $action=='sepa'}
+    <div class="tab-wrap">
+        <div class="tabs">
+            <ul>
+                <li><a {if $action=='details' } class="active" {/if} href="{$ca_url}clientarea/details/">{$lang.mydetails}</a></li>
+                <li><a {if $action=='password' } class="active" {/if} href="{$ca_url}clientarea/{$passwordURL}/">{$lang.changepass}</a></li>
+                {if $european}
+                <li><a {if $action=='sepa' } class="active" {/if} href="{$ca_url}clientarea/sepa/">{$lang.section_sepa}</a></li>
+                {/if}
+                {* <!-- {if $enableCCards}<li><a {if $action=='ccard' } class="active" {/if} href="{$ca_url}clientarea/ccard/">{$lang.ccard}</a></li>{/if} --> *}
+            </ul>
+            <div class="formwrap fw2 fw3">
+                <div class="bank">
+
+                    <div class="tstitle">
+                        <h3>{$lang.section_sepa}</h3>
+                    </div>
+                    <div class="blockDomi">
+                        {$lang.sepa_section_text}
+                        <div class="bankIco">
+                            <a target="_blank" href="/panel/?cmd=sepaform&action=form&m=b2b">
+                            <div class="imgb2b">
+                            <p>{$lang.form_c_sepa} <span style="color:#94ce0d;">B2B</span></p>
+                            <ul>
+                            <li>{$lang.sepa_link_b2b}</li>
+                            </ul>
+                            </div>
+                            </a>
+                            <a target="_blank" href="/panel/?cmd=sepaform&action=form&m=core">
+                            <div class="imgcore">
+                            <p>{$lang.form_c_sepa} <span style="color:#94ce0d;">CORE</span></p>
+                            <ul>
+                            <li>{$lang.sepa_link_core}</li>
+                            </ul>
+                            </div>
+                            </a>
+                        </div>
+                        <p>{$lang.sepa_end}</p>
+                    </div>
+                </div>
+                    {securitytoken}
+            </div><!--formwrap-->
+        </div><!--tabs-->
+    </div><!--tab-wrap-->
+<!--Fin del nuevo apartado de Domiciliacion bancaria-->
+    {*<!-- Desactivamos porque no se está usando -->
+    <!-- BEGIN AFFILIATES
+    {elseif $action=='affiliates'}
+    {if $affiliate}
+    <table width="100%" border=0 class="checker" cellspacing="0">
+
+        <tbody>
+
+        <tr><td align="right" width="160">{$lang.reflink}</td><td >
+                <input value="{$system_url}?affid={$affiliate.id}" readonly="readonly" class="styled" style="width:88%"/>
+        </td></tr>
+
+        <tr class="even">
+            <td align="right">{$lang.regdate}</td><td >
+                {$affiliate.date_created|dateformat:$date_format}</td></tr>
+
+        <tr >
+            <td align="right">{$lang.referred}</td><td >
+                {$affiliate.visits}</td></tr>
+
+        <tr class="even">
+            <td align="right">{$lang.curbalance}</td><td >
+                {$affiliate.balance|price:$currency}</td></tr>
+
+        <tr >
+            <td align="right">{$lang.withdrawn}</td><td >
+                {$affiliate.total_withdrawn|price:$currency}</td></tr>
+
+
+        </tbody>
+    </table>
+    {if $payout}
+    <br />
+    <center><input type="button" class="padded"  value="{$lang.payout}" style="font-weight:bold;font-size:13px;" onclick="window.location.href='{$ca_url}tickets&action=new';return false;"/></center>
+    {/if}
+
+    <br />
+    {if $affiliate.orders}
+    <h3>{$lang.yreferrals}</h3>
+    <table cellspacing="0" cellpadding="0" border="0" width="100%" class="styled">
+        <colgroup class="firstcol"></colgroup>
+        <colgroup class="alternatecol"></colgroup>
+
+        <colgroup class="firstcol"></colgroup>
+        <colgroup class="alternatecol"></colgroup>
+
+        <colgroup class="firstcol"></colgroup>
+        <colgroup class="alternatecol"></colgroup>
+        <tbody>
+        <tr>
+            <th>{$lang.signupdate}</th>
+            <th>{$lang.services}</th>
+            <th>{$lang.Amount}</th>
+            <th>{$lang.commission}</th>
+            <th>{$lang.status}</th>
+        </tr>
+        {foreach from=$affiliate.orders item=order}
+        <tr {if $smarty.foreach.foo.index%2 == 0}class="even"{/if}>
+
+            <td>{$order.date_created|dateformat:$date_format}</td>
+
+            <td>
+                {if $order.acstatus}{$lang.Account}: {$order.pname}{/if}
+                {if $order.domstatus}<br />{$lang.Domain}: {$order.domain}{/if}</td>
+            <td align="center">{$order.total|price:$currency}</td>
+            <td align="center">{$order.commission|price:$currency}</td>
+
+            <td align="center"><strong>{if $order.paid=='1'}{$lang.approved}{else}{$lang.Pending}{/if}</strong></td>
+        </tr>
+        {/foreach}
+        </tbody>
+
+
+    </table>
+    {/if}
+    <br />
+    {if $integration_code!=''}
+    <h3>{$lang.intcodes}</h3>
+    {$integration_code}
+    {/if}
+
+    {else}
+
+    {$lang.notaffiliateyet}<br />
+    <form action="" method="post">
+        <input type="hidden" value="activateaffiliate" name="make" />
+        <center><input type="submit" class="padded" style="font-weight:bold;font-size:14px" value="{$lang.becomeaffiliate}"/></center>{securitytoken}</form>
+    {/if}
+    END AFFILIATES -->*}
+
+    {* <!-- Desactivamos porque ya no almacenamos las tarjetas de crédito -->
+    <!-- BEGIN CREDIT CARD
+    {elseif $action=='ccard'}
+    <script type="text/javascript">
+    {literal}
+    $(document).ready(function()
+    {
+        $('#newccdetails').hide();
+        $(".combo-m").sexyCombo(
+        {
+            emptyText: "Choose a cardtype",
+            autoFill: true,
+            skin: "custom"
+        });
+    });
+    {/literal}
+    </script>
+    <div class="tab-wrap">
+        <div class="tabs">
+            <ul>
+                <li><a {if $action=='details' } class="active" {/if} href="{$ca_url}clientarea/details/">{$lang.mydetails}</a></li>
+                <li><a {if $action=='password' } class="active" {/if} href="{$ca_url}clientarea/{$passwordURL}/">{$lang.changepass}</a></li>
+                {if $enableCCards}<li><a {if $action=='ccard' } class="active" {/if} href="{$ca_url}clientarea/ccard/">{$lang.ccard}</a></li>{/if}
+            </ul>
+            <div class="formwrap fw2">
+                <form action="" method="post" class="ts">
+                    <div class="tstitle">
+                        <h3>{$lang.changeccdesc}</h3>
+                    </div>
+                    {if $ccard.cardnum}
+                    <div>
+                        <label>{$lang.cctype}:</label>
+                        {$ccard.cardtype}
+                    </div>
+
+                    <div>
+                        <label>{$lang.ccnum}:</label>
+                        {$ccard.cardnum}
+                    </div>
+
+                    <div>
+                        <label>{$lang.ccexpiry}:</label>
+                        {$ccard.expdate}
+                    </div>
+                    <div>
+                        <input type="button" value="{$lang.changecc}" id="newccbut" class="padded" onclick="$(this).attr('disabled','disabled'); $('#newccdetails').show(); return false;"  />
+                    </div>
+                    {else}
+                    <div>
+                        <label>{$lang.nothing}</label>
+                        <input type="button" value="{$lang.newcc}" id="newccbut" onclick="$(this).attr('disabled','disabled'); $('#newccdetails').show(); return false;"   class="padded"/>
+                    </div>
+                    {/if}
+                    {securitytoken}</form>
+                <form action="" method="post" class="ts" id="newccdetails">
+                    <div class="tstitle">
+                        <h3>{$lang.changeccdesc2}</h3>
+                    </div>
+                    <div class="cmb">
+                        <label>{$lang.cctype}</label>
+                        <p class="combo">
+                        <select name="cardtype" class="combo-m">
+                            <option>Visa</option>
+                            <option>MasterCard</option>
+                            <option>Discover</option>
+                            <option>American Express</option>
+                        </select>
+                        </p>
+                    </div>
+                    <div>
+                        <label>{$lang.ccnum}</label>
+                        <input type="text" name="cardnum"/>
+                    </div>
+                    <div>
+                        <label>{$lang.ccexpiry}</label>
+                        <input type="text" class="i50" name="expirymonth" maxlength="2" /> /
+                        <input type="text" class="i50" name="expiryyear" maxlength="2" /> (MM/YY)
+                    </div>
+                    <div>
+                        <input type="submit" name="addcard" value="{$lang.savechanges}"  class="padded"/>
+                        <input type="button" onclick="$('#newccdetails').hide(); $('#newccbut').removeAttr('disabled'); return false;" value="{$lang.cancelchanges}" class="padded"/>
+                    </div>
+                    {securitytoken}</form>
+            </div>
+        </div>
+    </div>
+    END CREDIT CARD --> *}
+
+    {elseif $action=='services' || $action=='accounts' || $action=='reseller' || $action=='vps' || $action=='servers'}
+
+        {include file='services.tpl'}
+
+    {elseif $action=='invoices'}
+
+        {include file='invoices.tpl'}
+
+    {elseif $action=='cancel'}
+
+        {include file='cancel.tpl'}
+
+    {elseif $action=='ccprocessing'}
+
+        {include file='ccprocessing.tpl'}
+
+    {elseif $action=='emails'}
+
+        {include file='emails.tpl'}
+
+    {elseif $action=='domains'}
+
+        {include file='domains.tpl'}
+
+    {else}
+    <script type="text/javascript">
+    {literal}
+    $(function()
+    {
+        splitMsg($('.wrap-balanceador h2'));
+    });
+
+    function add_qtip(id, message)
+    {
+        $('#' + id).qtip(
+        {
+            content: { text: message, },
+            show: 'mouseover',
+            hide: 'mouseout',
+            position: { my: 'center left', at: 'top right', target: $('#' + id), },
+            style: { classes: 'ui-tooltip-shadow ui-tooltip-dark', }
+        });
+    }
+    {/literal}
+    </script>
+    {php}
+    $hapi = new GApiWrapper();
+    $session_lang = $this->get_template_vars('globals')['_SESSION']['AppSettings']['user_language'];
+    $offer = $hapi->fixClientOffer(array('id' => $this->get_template_vars('login')['id'], 'lang' => $session_lang));
+    $this->assign('offer', $offer);
+    {/php}
+    {foreach from=$offer item=offe}
+        {if $offe.slug == "vlan"}
+            {assign var="vlan_count" value=$offe.total}
+        {elseif $offe.slug == "cloud-datacenter"}
+            {assign var="datacenter_count" value=$offe.total}
+        {/if}
+    {/foreach}
+    {foreach from=$offer item=offe}
+    <div class="wrap-servicio {if $offe.slug == 'cloud-datacenter'}wrap-dc
+         {elseif $offe.slug == 'cloud-vps'}wrap-box
+         {elseif $offe.slug == 'licencias'}wrap-licencias
+         {elseif $offe.slug == "vlan"}wrap-vlan
+         {elseif $offe.slug == 'load-balancer'}wrap-balanceador
+         {elseif $offe.slug == "wordpress-cloud"}wp-cloud-coket
+         {elseif $offe.slug == "advanced-backup"}wrap-backup-adv
+         {elseif $offe.slug == "advanced-firewall"}wrap-adv-firewall
+         {elseif $offe.slug == "cloud-server-oracle"}wrap-oracle-dc
+         {elseif $offe.slug == "vpn-cisco"}wrap-vpn
+         {elseif $offe.slug == "disaster-recovery"}wrap-dandr
+         {/if}">
+        <a class="list-linkbox" {if $offe.total > 0}href="{$ca_url}clientarea/services/{$offe.slug}/&amp;from=ca"{/if}>
+        <div class="services-box-ajust">
+        <h2>{if $offe.slug == 'licencias'}{$lang.licenses}{
+            elseif $offe.slug == 'vlan'}{$lang.vlans_service_name}{
+            elseif $offe.slug == 'advanced-backup'}{$lang.Backup_advanced}{
+            elseif $offe.slug == 'load-balancer'}{$lang.load_balancer}{
+            else}{$offe.name}{/if}</h2>
+        </div>
+        </a>
+        {if $offe.visible == '1'}
+            <div class="addservice-button">
+                {if $offe.slug == 'cloud-vps'}
+                <a href="{if $language=='english'}/en/{else}/{/if}cloud-vps#vps-planes">{$lang.Add}</a>
+                {elseif $offe.slug == 'vlan' && $datacenter_count == 0}
+                <a href="#vlan" id="vlan_add" >{$lang.Add}</a>
+                <script type="text/javascript">
+                add_qtip('vlan_add', '{$lang.vlan_tip_info}');
+                </script>
+                {elseif $offe.slug == 'vlan' && $globals.products_config.vlan.id}
+                <a href="?cmd=cart&action=add&id={$globals.products_config.vlan.id}&cycle=m">{$lang.Add}</a><a target="_blank" class="info-btn" href="{if $language=='english'}/static/documents/VLAN-EN-2015-web.pdf{else}/static/documents/VLAN-ES-2015-web.pdf{/if}"><span class="glyphicon glyphicon-info-sign"></span></a>
+                {elseif $offe.slug == 'advanced-backup' && $vlan_count == 0}
+                <a href="#backup_adv" id="backup_adv_add">{$lang.Add}</a>
+                <script type="text/javascript">
+                add_qtip('backup_adv_add', '{$lang.backup_adv_tip_info}');
+                </script>
+                {elseif $offe.slug == 'load-balancer' && $vlan_count == 0}
+                <a href="#balancer" id="balancer_add">{$lang.Add}</a>
+                <script type="text/javascript">
+                add_qtip('balancer_add', '{$lang.bal_tip_info}');
+                </script>
+                {else}
+                <a href="{$ca_url}cart/{$offe.slug}/">{$lang.Add}</a>
+                
+               
+                {if $offe.slug == 'load-balancer'}
+                <a target="_blank" class="info-btn" href="{if $language=='english'}/static/documents/load-balancer.pdf{else}/static/documents/balanceador.pdf{/if}"><span class="glyphicon glyphicon-info-sign"></span></a>
+              
+                {elseif $offe.slug == 'vpn-cisco'}
+                <a target="_blank" class="info-btn" href="{if $language=='english'}/static/documents/vpn-EN-web.pdf{else}/static/documents/vpn.pdf{/if}"><span class="glyphicon glyphicon-info-sign"></span></a>                
+                {elseif $offe.slug == 'advanced-backup'}
+                <a target="_blank" class="info-btn" href="{if $language=='english'}/static/documents/Advanced-backup.pdf{else}/static/documents/Backup-Avanzado.pdf{/if}"><span class="glyphicon glyphicon-info-sign"></span></a>
+                {/if}
+                
+                
+                {/if}
+            </div>
+            {/if}
+        {if $offe.total > 0}<a href="{$ca_url}clientarea/services/{$offe.slug}/&amp;from=ca">{/if}<div class="numero">{$offe.total}</div>{if $offe.total > 0}</a>{/if}
+    </div>
+    {/foreach}
+{/if}
+</section>

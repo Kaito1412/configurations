@@ -1,0 +1,101 @@
+"""
+Configuration file that defines the templates-specific behavior
+"""
+
+from django.conf import settings
+
+# i18n
+DEFAULT_LANGUAGE = 'es'
+DEFAULT_COUNTRY = 'ES'
+DEFAULT_CURRENCY = 'EUR'
+DEFAULT_DECIMALS = 1
+
+DEFAULT_COUNTRIES = {
+    'es': 'ES',
+    'en': 'GB',
+    }
+
+LATAM = ['CU', 'DO', 'PR', 'BZ', 'CR', 'SV', 'GT', 'HN', 'MX', 'NI', 'PA',
+         'AR', 'BO', 'CL', 'CO', 'EC', 'GY', 'PY', 'PE', 'SR', 'UY', 'VE']
+
+COUNTRY_INFO = {
+    "ES": {"language": "es", "currency": "EUR"},
+    "BR": {"language": "en", "currency": "USD"},
+    "US": {"language": "en", "currency": "USD"},
+    # The special ones ;)
+    "LATAM": {"language": "es", "currency": "USD", "variant": "co"},
+    "ROTW": {"language": "en", "currency": "EUR"},
+    }
+
+COUNTRIES = set(COUNTRY_INFO.keys())
+LANGUAGES = set([lang['language'] for lang in COUNTRY_INFO.values()])
+CURRENCIES = set([lang['currency'] for lang in COUNTRY_INFO.values()])
+ROOT_COUNTRIES = set(LATAM + [DEFAULT_COUNTRY])
+
+KAYAKO_LANG_ID = {"es": 7, "en": 1}
+KAYAKO_FAQ_ID = {"es": 4, "en": 15}
+
+# Caching
+CACHING = not settings.TEMPLATE_DEBUG
+CACHE_TIMEOUT = 86400
+INVALIDATE_BROWSERS_CACHE = True
+CACHE_PARAMETERS = ['country', 'cur']
+
+# Tpl
+TEMPLATE_PATH = 'www'
+DEFAULT_INDEX = 'index.html'
+
+RETRY_AFTER_SECONDS = 900
+
+FORMS_SETTINGS = {
+    "max_errors": 4,
+    "contact-form-iframe.html": {
+        "subject": "Solicitud de Contacto",
+        "email": {
+            "from": "root@gigas.com",
+            "to": "comercialgigas@gigas.com",
+        }
+    },
+    "contact.html": {
+        "subject": "Solicitud de Contacto",
+        "email": {
+            "from": "root@gigas.com",
+            "to": "comercialgigas@gigas.com",
+        }
+    },
+    "contact-form.html": {
+        "subject": "Solicitud de Contacto",
+        "email": {
+            "from": "root@gigas.com",
+            "to": "comercialgigas@gigas.com",
+        }
+    },
+    "trial-iframe.html": {
+        "subject": "Solicitud de Prueba para Cloud Datacenter",
+        "email": {
+            "from": "root@gigas.com",
+            "to": "comercialgigas@gigas.com",
+        }
+    },
+    "trial-form.html": {
+        "subject": "Solicitud de Prueba para Cloud Datacenter",
+        "email": {
+            "from": "root@gigas.com",
+            "to": "comercialgigas@gigas.com",
+        }
+    },
+    "disaster-recovery-form.html": {
+        "subject": "Formulario de solicitud de Disaster & Recovery",
+        "email": {
+            "from": "root@gigas.com",
+            "to": "DandR_form@gigas.com",
+        }
+    }
+}
+
+
+HTTP_PROXY = '10.0.32.12:8080'
+USER_PROXY = 'user'
+PASS_PROXY = 'pass'
+RECAPTCHA_PRIVATE_KEY = '6LeDReMSAAAAALfVlp5j4EOJEpEq2Hrlha3zp1fE'
+RECAPTCHA_PUBLIC_KEY = '6LeDReMSAAAAANcvLmmkxnCjzsvjpFjiblvNqrTY'

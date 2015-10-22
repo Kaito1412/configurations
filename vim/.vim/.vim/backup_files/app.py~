@@ -1,0 +1,50 @@
+#!Python
+
+import config
+from bottle import route, run
+from controllers.os import OS
+from controllers.cpu import CPU
+from controllers.memory import Memory 
+from controllers.disk import Disk
+
+test = {"hello": "world"}
+
+@route('/')
+def get():
+    return test
+
+@route('/api/resume')
+def get():
+    return {'os_name': OS.name(),
+            'os_dist': OS.distribution(),
+            'os_kernel': OS.kernel(),
+            'cpu_used': CPU.used(),
+            'memory_used': Memory.used(),
+            'memory_percent': Memory.percent(),
+            }
+
+@route('/api/cpu')
+def get():
+    return {'cpu_vendor': CPU.vendor(),
+            'cpu_model': CPU.model(),
+            'cpu_count': CPU.number(),
+            'cpu_used': CPU.used(),
+            'cpu_total': CPU.total(),
+            'cpu_temperature': CPU.temperature(),
+            }
+
+@route('/api/memory')
+def get():
+    return {'memory_used': Memory.used(),
+            'memory_percent': Memory.percent(),
+            'memory_total': Memory.total(),
+            'swap_used': Memory.swap_used(),
+            'swap_percent': Memory.swap_percent(),
+            'swap_total': Memory.swap_total(),
+            }
+
+@route('/api/disk')
+def get():
+    return Disk.all()
+
+run(host='0.0.0.0', port=config.PORT)

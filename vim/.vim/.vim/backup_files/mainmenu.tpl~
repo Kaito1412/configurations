@@ -1,0 +1,108 @@
+ <nav class="mainbar">
+        <div class="logo-container">
+            <h1 class="txt-logo"><a href="{$lang.langchange}/">gigas</a></h1>
+          <h1 class="tm">the cloud hosting company™</h1>
+        </div>
+        <div class="link-container">
+            <ul class="mainlinks collapse navbar-collapse">
+                <li class="dropdown">
+                    <a data-toggle="dropdown" href="#">{$lang.Productos} <span class="glyphicon glyphicon-chevron-down"></span></a>
+                    <ul class="dropdown-menu">
+                        <li><a href="{$lang.langchange}{$lang.clouddc_url}">{$lang.cloud_dc}</a></li>
+                        <li><a href="{$lang.langchange}{$lang.cloudbox_url}">{$lang.cloud_box}</a></li>
+                    </ul>
+                </li>
+                <li class="dropdown">
+                    <a data-toggle="dropdown" href="#">{$lang.Solutions} <span class="glyphicon glyphicon-chevron-down"></span></a>
+                    <ul class="dropdown-menu">
+                        <li><a href="{$lang.langchange}/disaster-recovery.html">{$lang.Contingency}</a></li>
+                        <li><a href="{$lang.langchange}/SAP-solution.html">{$lang.SAP_solution_menu}</a></li>
+                        <li><a href="{$lang.langchange}/cloud-server-oracle.html">{$lang.cloud_server_for_oracle}</a></li>
+                    </ul>
+                </li>
+                <li class="dropdown">
+                	<a data-toggle="dropdown" href="#">{$lang.About_gigas_menu} <span class="glyphicon glyphicon-chevron-down"></span></a>
+                        <ul class="dropdown-menu">
+                            <li><a href="{$lang.langchange}/empresa.html">{$lang.The_company_menu}</a></li>
+                            <li><a href="{$lang.langchange}/tecnologia-cloud.html">{$lang.Gigas_technology_menu}</a></li>
+                            <li><a href="{$lang.langchange}/clientes.html">{$lang.Clients_gigas_menu}</a></li>
+                             {if $language|lower == "spanish"}
+                            <li><a href="/blog/sala-de-prensa/">{$lang.Newsroom_menu}</a></li>
+                            {else}
+                            <li><a href="/blog/en/newsroom/">{$lang.Newsroom_menu}</a></li>
+                            {/if}
+                            <li><a href="{$lang.langchange}/inversores.html">{$lang.investors_stockholders}</a></li>
+                        </ul>
+                </li>
+                <li>{if $language|lower == "spanish"}
+                	<a href="/blog/">Blog</a> {else}
+                    <a href="/blog/en/">Blog</a>{/if}
+                </li>
+                <li class="supportbutton dropdown">
+                    <a data-toggle="dropdown" href="#"><span class="menuicons supporticon"></span>{$lang.Support_menu} <span class="glyphicon glyphicon-chevron-down"></span></a>
+                    <ul class="dropdown-menu">
+                        {if $language|lower == "spanish"}
+                            <li><a href="/to_support.html?lang=es&url=support" target="_blank">{$lang.Support_menu}</a></li>
+                            <li><a href="/support/Knowledgebase/List/Index/4/preguntas-frecuentes">F.A.Q.</a></li>
+                            <li><a href="/support/Knowledgebase/List/Index/59/espaol">{$lang.Knowledgebase_menu}</a></li>
+                        {else}
+                            <li><a href="/to_support.html?lang=en&url=support" target="_blank">{$lang.Support_menu}</a></li>
+                            <li><a href="/support/Knowledgebase/List/Index/15/faqs">F.A.Q.</a>
+                            <li><a href="/support/Knowledgebase/List/Index/5/english">{$lang.Knowledgebase_menu}</a></li>
+                        {/if}
+                    </ul>
+                </li>
+
+                {if $logged=='1'}
+                 <li class="pannelbutton headlogged dropdown">
+                    <a data-toggle="dropdown" href="#"><i class="logged-icon"></i><strong>{$login.firstname}</strong>
+                    <span class="glyphicon glyphicon-chevron-down"></span></a>
+                    <ul class="dropdown-menu">
+                    		<li><a href="{$ca_url}clientarea/services/">{$lang.myservices}</a></li>
+                            <li><a href="{$ca_url}clientarea/domains/">{$lang.mydomains}</a></li>
+                            <li><a href="{$ca_url}clientarea/invoices/">{$lang.myinvoices}</a></li>
+                            <li><a href="{$ca_url}clientarea/details/">{$lang.client_details}</a></li>
+                            <li><a id="logout" href="?action=logout"><span class="glyphicon glyphicon-log-out"></span> {$lang.logout}</a></span></li>
+                        </ul>
+                </li>
+
+                {else}
+                 <li class="pannelbutton headlogged">
+                    <a href="{$ca_url}clientarea/services"><span class="menuicons pannelicon"></span>{$lang.Control_panel_menu}</a>
+                </li>
+                {/if}
+
+                 <li class="languagebutton dropdown">
+                    <a data-toggle="dropdown" href="#">{if $language == 'spanish'}ES{elseif $language == 'english'}EN{else}--{/if} <span class="glyphicon glyphicon-chevron-down"></span></a>
+                    <ul class="dropdown-menu fix-idioma">
+	    	                {assign var="langselected" value=$smarty.post.languagechange}
+			        		{if !$langselected or $langselected == ''}
+        			    		{assign var="langselected" value=$language|capitalize}
+			    		    {/if}
+                             <li><a {if $langselected == 'Spanish'}class="activemode"{/if}href="/" data-language="Spanish">ES</a></li>
+                            <li><a {if $langselected == 'English'}class="activemode"{/if}href="/en/" data-language="English">EN</a></li>
+                        </ul>
+
+                </li>
+                {if $currencies|@count gt 1 && $logged!='1'}
+                <li class="languagebutton dropdown">
+    <a data-toggle="dropdown" href="#">{$currency.sign} <span class="glyphicon glyphicon-chevron-down"></span></a>
+                    <ul class="dropdown-menu fix-moneda">
+	            	        {assign var="currselected" value=$smarty.cookies.currency}
+    					    {if !$currselected or $currselected == ''}
+					    	    {assign var="currselected" value=$currency.code}
+					        {/if}
+                            <li><a {if $currselected == 'EUR'}class="activemode"{/if}href="?cur=EUR" data-currency="EUR">€</a></li>
+                            <li><a {if $currselected == 'USD'}class="activemode"{/if}href="?cur=USD" data-currency="USD">$</a></li>
+                        </ul>
+			    </li>
+                {/if}
+            </ul>
+          </div>
+      </nav>
+<script>
+{if $currencies|@count gt 1 && $logged!='1'}
+var currencies = {literal}{{/literal}{foreach from=$currencies item=crx}{if $crx.code}{$crx.code}{else}{$crx.iso}{/if}: {$crx.id}, {/foreach}NUM: {$currencies|@count}{literal}}{/literal};
+{/if}
+</script>
+<script type="text/javascript" src="{$template_dir}js/locale.js"></script>

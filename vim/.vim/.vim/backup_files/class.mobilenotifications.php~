@@ -1,0 +1,464 @@
+<?php
+/**
+ *
+ * @ This file is created by DeZend.Org
+ * @ DeZend (PHP5 Decoder for ionCube Encoder)
+ *
+ * @	Version			:	1.1.7.0
+ * @	Author			:	TuhanTS
+ * @	Release on		:	25.02.2013
+ * @	Official site	:	http://DeZend.Org
+ *
+ */
+
+class MobileNotifications extends HBModel {
+	protected $engine = null;
+
+	/**
+	 *
+	 * @var Engine
+	 */
+	function __construct() {
+		$this->engine = Engine::singleton(  );
+	}
+
+	function ProductAccountCreated($details) {
+		$mailer = HBLoader::loadcomponent( 'Net/SMS' );
+		$service = $details['service'];
+
+		if (!$service) {
+			return false;
+		}
+
+		$service['product_name'] = $details['product']['name'];
+		$mailer->addClientFromDB( $details['service']['client_id'], array( 'services', 'notify', $service['id'] ) );
+
+		if (!$mailer->loadFromTemplate( 'Mobile:Account:Created', 'Client' )) {
+			return false;
+		}
+
+		$mailer->template->assign( 'service', $service );
+		$mailer->template->assign( 'product', $details['product'] );
+		$mailer->fetchTpl(  );
+		$mailer->Send(  );
+	}
+
+	/**
+	 * Notify all staff members assigned to dept about escalated ticket
+
+	 */
+	function send_escalation($ticket_id, $level = 1) {
+		$mailer = HBLoader::loadcomponent( 'Net/SMS' );
+
+		if (!$mailer->loadFromTemplate( 'Mobile:Ticket:Escalated', 'Admin' )) {
+			return false;
+		}
+
+		Ticket;
+		$ticket = new ( $ticket_id, FROMID_LOAD );
+
+		if ($ticket->isShared( 'slave' )) {
+			return null;
+		}
+
+
+		if ($ticket->getTicketId(  ) != $ticket_id) {
+			return null;
+		}
+
+		$details = $ticket->getTicketDetails(  );
+		$dept = $ticket->getDepartmentDetails( $details['dept_id'] );
+
+		if ($dept['sendmail'] == '0') {
+			return null;
+		}
+
+
+		if ($dept['sendmethod'] != MAIL_SYSTEM) {
+			$this->departmentEmailSettup( $dept, $mailer );
+		}
+
+		$details['department'] = $dept['name'];
+		$mailer->addAdminFromDB( $dept['assigned_admins'], $note['admin_id'], array( 'viewTickets' ) );
+		$mailer->logemail = false;
+		$mailer->template->assign( 'ticket', $details );
+
+		if (1 < $level) {
+			$mailer->template->assign( 'overdue', 1 );
+		}
+
+		$ticket_admin_url = Engine::singleton(  )->getConfig( 'InstallURL' ) . Engine::singleton(  )->getConfig( 'HBAdminFolder' ) . '?cmd=tickets&action=view&num=' . $ticket->getTicketNumber(  );
+		$mailer->template->assign( 'ticket_admin_url', $ticket_admin_url );
+		$mailer->fetchTpl(  );
+		$mailer->Send(  );
+	}
+
+	function after_ticketescalate($details) {
+		return $this->send_escalation( $details );
+	}
+
+	function after_ticketoverdue($details) {
+		return $this->send_escalation( $details, 2 );
+	}
+
+	function UnpaidInvoiceReminder($details) {
+		$mailer = HBLoader::loadcomponent( 'Net/SMS' );
+		$invoice = $details['invoice'];
+		$mailer->addClientFromDB( $invoice->getClientId(  ), array( 'billing', 'emails' ) );
+
+		if (!$mailer->loadFromTemplate( 'Mobile:Invoice:Reminder', 'Client' )) {
+			return false;
+		}
+
+		$items = $invoice->getInvoiceItems(  );
+		$mailer->template->assign( 'invoiceitems', $items );
+		$inv = $invoice->getInvoice(  );
+		$inv['id'] = $invoice->getInvoiceFormattedId(  );
+		$inv['total'] = $invoice->getTransactionsBalance(  );
+		$inv['gateway'] = ModuleFactory::singleton(  )->getModuleNameById( $inv['payment_module'] );
+		$mailer->template->assign( 'invoice', $inv );
+		$mailer->fetchTpl(  );
+		return $mailer->Send(  );
+	}
+
+	function InvoiceCreated($details) {
+		$mailer = HBLoader::loadcomponent( 'Net/SMS' );
+		$invoice = $details['invoice'];
+		$mailer->addClientFromDB( $invoice->getClientId(  ), array( 'billing', 'emails' ) );
+
+		if (!$mailer->loadFromTemplate( 'Mobile:Invoice:New', 'Client' )) {
+			return false;
+		}
+
+		$items = $invoice->tax->taxItems( $invoice );
+		$mailer->template->invoiceCurrency = $invoice->getCurrency(  );
+		$mailer->template->assign( 'invoiceitems', $items );
+		$mailer->template->assign( 'invoice_num', $invoice->getInvoiceId(  ) );
+		$inv = $invoice->getInvoice(  );
+		$inv['id'] = $invoice->getInvoiceFormattedId(  );
+		$inv['total'] = $invoice->getTransactionsBalance(  );
+		$inv['gateway'] = ModuleFactory::singleton(  )->getModuleNameById( $inv['payment_module'] );
+		$mailer->template->assign( 'invoice', $inv );
+		$mailer->fetchTpl(  );
+
+		if ($mailer->Send(  )) {
+			return true;
+		}
+
+	}
+
+	function expiringDomain($domain) {
+		if (!isset( $domain['name'] )) {
+			return null;
+		}
+
+		$mailer = HBLoader::loadcomponent( 'Net/SMS' );
+		$mailer->addClientFromDB( $domain['client_id'], array( 'domains', 'notify', $domain['id'] ) );
+
+		if (!$mailer->loadFromTemplate( 'Mobile:Domain:Reminder', 'Client' )) {
+			return false;
+		}
+
+		$mailer->template->assign( 'domain', $domain );
+		$mailer->fetchTpl(  );
+		$mailer->Send(  );
+	}
+
+	function InvoicePaid($details) {
+		$mailer = HBLoader::loadcomponent( 'Net/SMS' );
+		$invoice = $details;
+		$mailer->addPriviligedAdmin( 'mobileNewPayment' );
+
+		if (!$mailer->loadFromTemplate( 'Mobile:Transaction:New', 'Admin' )) {
+			return false;
+		}
+
+		$items = $invoice->getInvoiceItems(  );
+		$mailer->template->invoiceCurrency = $invoice->getCurrency(  );
+		$mailer->template->assign( 'invoiceitems', $items );
+		$inv = $invoice->getInvoice(  );
+		$inv['id'] = $invoice->getInvoiceFormattedId(  );
+		$inv['total'] = $inv['total'] - $invoice->getTransactionsBalance(  );
+		$inv['gateway'] = ModuleFactory::singleton(  )->getModuleNameById( $inv['payment_module'] );
+		$mailer->template->assign( 'invoice', $inv );
+		$transaction = $invoice->getRelatedTransactions(  );
+		$transaction = $transaction[0];
+		$mailer->template->assign( 'transaction', $transaction );
+		$mailer->fetchTpl(  );
+
+		if ($mailer->Send(  )) {
+			return true;
+		}
+
+	}
+
+	function TicketNotesUpdated($ticket) {
+		$mailer = HBLoader::loadcomponent( 'Net/SMS' );
+		$dept = $ticket->getDepartmentDetails(  );
+
+		if ($dept['sendmail'] == '0') {
+			return null;
+		}
+
+		$ticketdetails = $ticket->getTicketDetails(  );
+		$ticketdetails['department'] = $dept['name'];
+		$mailer->ClearReplyTos(  );
+		$mailer->addAdminFromDB( $dept['assigned_admins'], false, array( 'viewTickets' ) );
+
+		if (!$mailer->loadFromTemplate( 'Mobile:Ticket:Note', 'Admin' )) {
+			return false;
+		}
+
+		$notes = $ticket->getNotes(  );
+		$note = end( $notes );
+		$note['msg'] = $note['note'];
+		$mailer->template->assign( 'notes', $ticket->getOldNotes(  ) );
+		$mailer->template->assign( 'note', $note );
+		$mailer->template->assign( 'ticket', $ticketdetails );
+		$mailer->fetchTpl(  );
+		$mailer->Send(  );
+	}
+
+	function NewTicketReply($ticket) {
+		$reply = $ticket->getReplies(  );
+		$reply = end( $reply );
+		$att = $ticket->getTicketAttachments(  );
+		$mailer = HBLoader::loadcomponent( 'Net/SMS' );
+		$details = $ticket->getTicketDetails(  );
+		$ticket_admin_url = Engine::singleton(  )->getConfig( 'InstallURL' ) . Engine::singleton(  )->getConfig( 'HBAdminFolder' ) . '?cmd=tickets&action=view&num=' . $ticket->getTicketNumber(  );
+		$dept = $ticket->getDepartmentDetails(  );
+
+		if ($dept['sendmail'] == '0') {
+			return null;
+		}
+
+		$details['department'] = $dept['name'];
+		$mailer->ClearReplyTos(  );
+
+		if (isset( $reply['type'] )) {
+			switch ($reply['type']) {
+			case 'Admin': {
+					if (!$ticket->isShared( 'slave' )) {
+						if ($details['client_id'] != 0) {
+							$mailer->addClientFromDB( $details['client_id'], array( 'support', 'emails' ) );
+						}
+						else {
+							break;
+						}
+
+
+						if ($mailer->loadFromTemplate( 'Mobile:Ticket:Reply', 'Client' )) {
+							$mailer->template->assign( 'reply', $reply );
+							$mailer->template->assign( 'ticket', $details );
+							$mailer->fetchTpl( false );
+							$mailer->Send(  );
+						}
+					}
+
+					break;
+				}
+
+			case 'Client': {
+					if (!$mailer->loadFromTemplate( 'Mobile:Ticket:Reply', 'Admin' )) {
+						return false;
+					}
+
+					$mailer->addAdminFromDB( $dept['assigned_admins'], false, array( 'viewTickets' ) );
+					$mailer->template->assign( 'ticket_url', $ticket_url );
+					$mailer->template->assign( 'ticket_admin_url', $ticket_admin_url );
+					$mailer->template->assign( 'reply', $reply );
+					$mailer->template->assign( 'ticket', $details );
+					$mailer->fetchTpl( false );
+					$mailer->Send(  );
+				}
+			}
+		}
+
+	}
+
+	function NewTicket($ticket) {
+		$mailer = HBLoader::loadcomponent( 'Net/SMS' );
+		$details = $ticket->getTicketDetails(  );
+		$mailer->template->assign( 'ticket', $details );
+		$mailer->template->assign( 'ticket_admin_url', Engine::singleton(  )->getConfig( 'InstallURL' ) . Engine::singleton(  )->getConfig( 'HBAdminFolder' ) . '?cmd=tickets&action=view&num=' . $ticket->getTicketNumber(  ) );
+		$dept = $ticket->getDepartmentDetails(  );
+
+		if ($dept['sendmail'] == '0') {
+			return null;
+		}
+
+		$details['department'] = $dept['name'];
+		$mailer->ClearReplyTos(  );
+		$mailer->fetchTpl( false );
+
+		if (!$mailer->loadFromTemplate( 'Mobile:Ticket:New', 'Admin' )) {
+			return false;
+		}
+
+		$mailer->addAdminFromDB( $dept['assigned_admins'], false, array( 'viewTickets' ) );
+		$mailer->template->assign( 'ticket', $details );
+		$mailer->fetchTpl( false );
+		$mailer->Send(  );
+	}
+
+	function AfterRegistrarRegistration($domain) {
+		$q = $this->db->prepare( 'SELECT * FROM hb_domains WHERE id=? LIMIT 1' );
+		$q->execute( array( $domain['id'] ) );
+		$d = $q->fetch( FETCH_ASSOC );
+		$q->closeCursor(  );
+
+		if (!$d) {
+			return false;
+		}
+
+		$mailer = HBLoader::loadcomponent( 'Net/SMS' );
+		$mailer->addClientFromDB( $d['client_id'], array( 'domains', 'notify', $d['id'] ) );
+
+		if (!$mailer->loadFromTemplate( 'Mobile:Domain:Registered', 'Client' )) {
+			return false;
+		}
+
+		$mailer->template->assign( 'domain', $d );
+		$mailer->fetchTpl(  );
+		$mailer->Send(  );
+	}
+
+	function AfterRegistrarTransfer($domain) {
+		$q = $this->db->prepare( 'SELECT * FROM hb_domains WHERE id=? LIMIT 1' );
+		$q->execute( array( $domain['id'] ) );
+		$d = $q->fetch( FETCH_ASSOC );
+		$q->closeCursor(  );
+
+		if (!$d) {
+			return false;
+		}
+
+		$mailer = HBLoader::loadcomponent( 'Net/SMS' );
+		$mailer->addClientFromDB( $d['client_id'], array( 'domains', 'notify', $d['id'] ) );
+
+		if (!$mailer->loadFromTemplate( 'Mobile:Domain:Transfer', 'Client' )) {
+			return false;
+		}
+
+		$mailer->template->assign( 'domain', $d );
+		$mailer->fetchTpl(  );
+		$mailer->Send(  );
+	}
+
+	function DomainAutomationNotify($details) {
+		if ($details['result']) {
+			return true;
+		}
+
+		$mailer = HBLoader::loadcomponent( 'Net/SMS' );
+
+		if (!$mailer->loadFromTemplate( 'Mobile:DomainAutomation:Failed', 'Admin' )) {
+			return false;
+		}
+
+		$client = HBLoader::loadmodel( 'Clientarea' );
+		$client_details = $client->get_client_details( $details['domain_details']['client_id'] );
+		$mailer->template->assign( 'domain', $details['domain_details'] );
+		$mailer->template->assign( 'client', $client_details );
+		$mailer->template->assign( 'domain_action', ucfirst( $details['action'] ) );
+		$mailer->template->assign( 'domain_result', $details['result'] );
+		$mailer->template->assign( 'domain_error', $details['error'] );
+		$priv = 'mobileFailedAutomation';
+		$mailer->addPriviligedAdmin( $priv );
+		$mailer->fetchTpl(  );
+		$mailer->Send(  );
+	}
+
+	function AdminNotifyAccount($details) {
+		if ($details['result']) {
+			return true;
+		}
+
+
+		if (( !isset( $details['action'] ) || !isset( $details['result'] ) )) {
+			return false;
+		}
+
+		$actions = array( 'create', 'suspend', 'unsuspend', 'terminate', 'upgrade', 'upgrade forms' );
+
+		if (!in_array( $details['action'], $actions )) {
+			return false;
+		}
+
+		$mailer = HBLoader::loadcomponent( 'Net/SMS' );
+
+		if (!$mailer->loadFromTemplate( 'Mobile:AccountAutomation:Failed', 'Admin' )) {
+			return false;
+		}
+
+		$q = $this->db->prepare( 'SELECT accs.*, prod_conf.module, prods.name as product_name FROM hb_accounts accs LEFT JOIN hb_products prods ON(prods.id=accs.product_id) LEFT JOIN hb_products_modules prod_conf ON(prods.id=prod_conf.product_id) WHERE accs.id=? LIMIT 1' );
+		$q->execute( array( $details['service_id'] ) );
+		$service = $q->fetch( FETCH_ASSOC );
+		$q->closeCursor(  );
+
+		if (!$service) {
+			return false;
+		}
+
+		$client = HBLoader::loadmodel( 'Clientarea' );
+		$client_details = $client->get_client_details( $service['client_id'] );
+		$mailer->template->assign( 'domain_module', $domain_module );
+		$mailer->template->assign( 'service', $service );
+
+		if (isset( $details['accountdata'] )) {
+			$mailer->template->assign( 'metadata', $details['accountdata'] );
+		}
+
+		$mailer->template->assign( 'client', $client_details );
+		$mailer->template->assign( 'account_action', $details['action'] );
+		$mailer->template->assign( 'result', $details['result'] );
+		$mailer->template->assign( 'account_error', $details['error'] );
+		$mailer->logemail = false;
+		$mailer->addPriviligedAdmin( 'mobileFailedAutomation' );
+		$mailer->fetchTpl(  );
+		$mailer->Send(  );
+	}
+
+	function AdminNotifyNewOrder($order_id) {
+		Order;
+		$order = new ( $order_id );
+		$data = $order->getOrderData(  );
+		$client = HBLoader::loadmodel( 'Clientarea' );
+		$client_details = $client->get_client_details( $data['client_id'] );
+		$client_details['countryname'] = Utilities::get_country_name( $client_details['country'] );
+		$mailer = HBLoader::loadcomponent( 'Net/SMS' );
+		$mailer->template->invoiceCurrency = $client_details['currency_id'];
+
+		if (!$mailer->loadFromTemplate( 'Mobile:Order:New', 'Admin' )) {
+			return false;
+		}
+
+		$mailer->template->assign( 'order', $data );
+		$mailer->template->assign( 'client', $client_details );
+		$mailer->fetchTpl(  );
+		$mailer->addPriviligedAdmin( 'mobileNewOrder' );
+		$mailer->Send(  );
+	}
+
+	function FailedAdminLoginAttempt2($data) {
+		$this->FailedAdminLoginAttempt( $data );
+	}
+
+	function FailedAdminLoginAttempt($data) {
+		$mailer = HBLoader::loadcomponent( 'Net/SMS' );
+
+		if (!$mailer->loadFromTemplate( 'Mobile:Failed Login', 'Admin' )) {
+			return false;
+		}
+
+		$mailer->template->assign( 'date', date( 'Y-m-d H:i:s' ) );
+		$mailer->template->assign( 'ip', $_SERVER['REMOTE_ADDR'] );
+		$mailer->template->assign( 'host', gethostbyaddr( $_SERVER['REMOTE_ADDR'] ) );
+		$mailer->template->assign( 'login', $data['username'] );
+		$mailer->addPriviligedAdmin( 'failedLogin' );
+		$mailer->fetchTpl(  );
+		$mailer->Send(  );
+	}
+}
+
+?>

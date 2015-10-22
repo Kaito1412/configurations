@@ -8,14 +8,12 @@ function error_handler {
   fi  
 }
 
-export EDITOR=/usr/bin/vim
-
 trap 'error_handler' ERR
 
-# Options about history
 export HISTFILE="$HOME/.history"
 export SAVEHIST=$HISTSIZE
-setopt incappendhistory
+
+export EDITOR=/usr/bin/vim
 
 # Resaltado de sintaxis. Hace Falta tener instalado
 source /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh

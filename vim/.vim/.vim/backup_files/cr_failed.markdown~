@@ -1,0 +1,76 @@
+Code review failed
+==================
+                                                                                                  v.0.2.0
+
+## Coge la tarea en estado ``New`` con tracker ``Code review``
+
+### Redmine
+
+* Cambiale el estado a ``In progress``
+
+* Lee los comentarios del "reviewer" (reviewer = persona que nos hace el
+  review :)
+
+* Si te surgen dudas habla directamente con el "reviewer". Antes de empezar
+  las correcciones debes entender bien qué es lo que se te pide
+
+* Si quieres dejar comentarios adicionales al review hazlo en redmine mediante
+  un ``Quote``, haciendo click en el bocadillo que hay al lado del lapicito
+  de editar la nota
+
+### Git
+
+Los cambios se hacen sobre la rama del ticket original.
+
+Haz rebase con ``origin/int`` para actualizar tu rama:
+
+    ```
+    git rebase origin/int
+    ```
+
+Arranca el desarrollo.
+
+
+## Cuando termines el desarrollo
+
+¡No se hace demo!
+
+### Git
+
+* Crea un commit de fixup:
+
+    ```
+    git commit --fixup=HEAD~
+    ```
+
+* Adicionalmente puedes hacer un ``--amend`` para añadir al mensaje el id de
+  la tarea de ``Code review`` mediante:
+
+    ```
+    git commit --amend
+    ```
+
+  , resultando un mensaje similar a este:
+
+    ```
+    fixup! bla bla bla bla
+    <linea en blanco>
+    [issue: #xxxx]
+    ```
+
+### Redmine
+
+* Cambia los siguientes campos de la tarea de ``Code review``:
+
+   * Status: ``Closed``
+   * Done: ``100%``
+
+* Logale (a la tarea de ``Code review``) el tiempo empleado en el desarrollo
+
+* En la tarea original, cambia el estado a ``CR request`` y modifica las
+  cabeceras que sea necesario actualizar. No olvides cambiar la cabecera
+  **Commits** añadiendo el nuevo commmit que hemos creado con formato:
+
+  ```
+  fixup! commit:<commit_hash>
+  ```

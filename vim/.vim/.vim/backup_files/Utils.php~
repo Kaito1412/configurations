@@ -1,0 +1,444 @@
+<?php
+
+class GigasUtilities
+{
+
+    public static function validateLanguage($language)
+    {
+        $isValid = false;
+        $languages = array('es', 'en', 'de');
+        if(in_array($language, $languages))
+        {
+            $isValid = true;
+        }
+
+        return $isValid;
+    }
+
+    public static function validateEmail($email)
+    {
+        return preg_match("/^[_\.0-9a-zA-Z-ñÑ]+@([0-9a-zA-Z][0-9a-zA-Z-]+\.)+[a-zA-Z]{2,6}$/i", $email);
+    }
+
+    public static function validatePostCode($post_code)
+    {
+        //$ post_code = trim($post_code);
+        return preg_match('/^[0-9]{5}$/', $post_code);
+    }
+
+    public static function validatePort($port)
+    {
+        return preg_match('/^[0-9]{1,5}$/', $port);
+    }
+
+    public static function validatePhone($phone)
+    {
+        return preg_match('/^[0-9]{9}$/', $phone);
+    }
+
+    public static function validateNum($number)
+    {
+        return (is_numeric($number) && $number >= 0);
+    }
+
+    public static function validateNumAndNull($number, $min=null, $max=null)
+    {
+        $check = ((is_numeric($number) && $number >= 0) || $number == '');
+
+        if ($number)
+        {
+            if($min && intval($number) < $min)
+            {
+                return false;
+            }
+
+            if($max && intval($number) > $max)
+            {
+                return false;
+            }
+        }
+
+        return $check;
+    }
+
+    public static function validatePrice($price)
+    {
+        $price = trim($price);
+        $price = str_replace(' ','', $price);
+
+        $valid_price = false;
+        if (is_numeric($price) && $price >= 0)
+        {
+            $valid_price = true;
+        }
+
+        return $valid_price;
+    }
+
+    public static function validatePayDate($payDate)
+    {
+        $isValid = false;
+        $limitPayDate = strtotime('+3 months', time());
+        if($payDate > time() && $payDate < $limitPayDate)
+        {
+            $isValid = true;
+        }
+
+        return $isValid;
+    }
+
+    public static function validateCifNif($value)
+    {
+        $value = trim($value);
+        $value = str_replace(' ','',$value);
+        $cif = strtoupper($value);
+        for ($i = 0; $i < 9; $i ++)
+        {
+            $num[$i] = substr($cif, $i, 1);
+        }
+
+        //si no tiene un formato valido devuelve error
+        if (preg_match('/((^[A-Z]{1}[0-9]{7}[A-Z0-9]{1}$|^[T]{1}[A-Z0-9]{8}$)|^[0-9]{8}[A-Z]{1}$)/', $cif))
+        {
+            //comprobacion de NIFs estandar
+            if (preg_match('/(^[0-9]{8}[A-Z]{1}$)/', $cif))
+                if ($num[8] == substr('TRWAGMYFPDXBNJZSQVHLCKE', substr($cif, 0, 8) % 23, 1))
+                    return 'OK';
+                else
+                    return 'Invalid NIF';
+
+            //algoritmo para comprobacion de codigos tipo CIF
+            $suma = $num[2] + $num[4] + $num[6];
+            for ($i = 1; $i < 8; $i += 2)
+                $suma += substr((2 * $num[$i]),0,1) + substr((2 * $num[$i]),1,1);
+
+            $n = 10 - substr($suma, strlen($suma) - 1, 1);
+
+            //comprobacion de NIFs especiales (se calculan como CIFs o como NIFs)
+            if (preg_match('/^[KLM]{1}/', $cif))
+                if ($num[8] == chr(64 + $n) || $num[8] == substr('TRWAGMYFPDXBNJZSQVHLCKE', substr($cif, 1, 8) % 23, 1))
+                    return 'OK';
+                else
+                    return 'Invalid NIF';
+
+            //comprobacion de CIFs
+            if (preg_match('/^[ABCDEFGHJNPQRSUVW]{1}/', $cif))
+                if ($num[8] == chr(64 + $n) || $num[8] == substr($n, strlen($n) - 1, 1))
+                    return 'OK';
+                else
+                    return 'Invalid CIF';
+
+            //comprobacion de NIEs
+            //T
+            if (preg_match('/^[T]{1}/', $cif))
+                if ($num[8] == preg_match('/^[T]{1}[A-Z0-9]{8}$/', $cif))
+                    return 'OK';
+                else
+                    return 'Invalid NIE';
+
+            //XYZ
+            if (preg_match('/^[XYZ]{1}/', $cif))
+                if ($num[8] == substr('TRWAGMYFPDXBNJZSQVHLCKE', substr(str_replace(array('X','Y','Z'), array('0','1','2'), $cif), 0, 8) % 23, 1))
+                    return 'OK';
+                else
+                    return 'Invalid value';
+        }
+        else
+        {
+            return 'Invalid format';
+        }
+    }
+
+    public static function validateCardNumber($cardNumber)
+    {
+        $isValid = false;
+        if(preg_match('/^[0-9]{16}$/', $cardNumber))
+        {
+            $suma = 0;
+            for ($i = 0; $i < 16; $i++)
+            {
+                $num[$i] = substr($cardNumber, $i, 1);
+
+                if ($i % 2) {
+                    $suma += $num[$i]; //par
+                }
+                else
+                { //impar
+                    $number = 2 * $num[$i];
+                    if ($number > 9)
+                    {
+                        $number += $number-9; /* Es equivalente ($number%10) + 1*/;
+                    }
+
+                    $suma += $number;
+                }
+            }
+
+            if ($suma % 10 == 0)
+            {
+                $isValid = true;
+            }
+        }
+
+        return $isValid;
+    }
+
+    public static function validateBankAccount($value)
+    {
+        $isValid = false;
+        if (preg_match('/^[0-9]{20}$/', $value))
+        {
+            $num1[0] = 0;
+            $num1[1] = 0;
+            for ($i = 0; $i < 8; $i++)
+            {
+                $num1[$i+2] = intval(substr($value, $i, 1));
+            }
+
+            $control1 = self::obtenerDigitoControl($num1);
+
+            if(intval(substr($value, 8, 1)) == $control1)
+            {
+                for ($i = 0; $i < 10; $i++)
+                {
+                    $num2[$i] = intval(substr($value, $i+10, 1));
+                }
+
+                $control2 = self::obtenerDigitoControl($num2);
+
+                if(intval(substr($value, 9, 1)) == $control2)
+                {
+                    $isValid = true;
+                }
+            }
+        }
+
+        return $isValid;
+    }
+
+    public static function obtenerDigitoControl($valor)
+    {
+        $valores = array(1, 2, 4, 8, 5, 10, 9, 7, 3, 6);
+        $control = 0;
+        for ($i = 0; $i < 10; $i++)
+        {
+            $control += $valor[$i] * $valores[$i];
+        }
+
+        $control = 11 - ($control % 11);
+        if ($control == 11)
+        {
+            $control = 0;
+        }
+        else if ($control == 10)
+        {
+            $control = 1;
+        }
+
+        return $control;
+    }
+
+    public static function validateCardType($cardType)
+    {
+        $validCard = false;
+        $cardType = str_replace('-','',self::slugify($cardType));
+        if($cardType == 'visa' || $cardType == 'visaelectron' || $cardType == 'mastercard' ||
+            $cardType == 'maestro' || $cardType == 'americanexpress')
+        {
+            $valid = true;
+        }
+
+        return $valid;
+    }
+
+    public static function validateCardExpiration($cardExpiration)
+    {
+        $validCard = false;
+        if(preg_match('/^[0-9]{2}\/[0-9]{2}$/', $cardExpiration))
+        {
+            $month = substr($cardExpiration,0,2);
+            $year = substr($cardExpiration,3,2);
+            if(checkdate($month, 1, $year))
+            {
+                $year = '20'.$year;
+                $numDays = cal_days_in_month(CAL_GREGORIAN, $month , $year);
+                $date = mktime(0,0,0, $month, $numDays, $year);
+                if($date > time())
+                {
+                    $validCard = true;
+                }
+            }
+        }
+
+        return $validCard;
+    }
+
+    public static function validateDomain($url)
+    {
+        die("geroma");
+        if(!preg_match('^(([a-zA-Z]{1})|([a-zA-Z]{1}[a-zA-Z]{1})|([a-zA-Z]{1}[0-9]{1})|([0-9]{1}[a-zA-Z]{1})|([a-zA-Z0-9][a-zA-Z0-9-_]{1,61}[a-zA-Z0-9]))\.([a-zA-Z]{2,6}|[a-zA-Z0-9-]{2,30}\.[a-zA-Z]{2,3})$', $url))
+        {
+            return false;
+        }
+        
+        return true;
+    }
+
+    public static function validateDnsDomain($url)
+    {
+        $valid = true;
+        $domain = explode(".", $url);
+
+        foreach($domain as $elem)
+        {
+            if(!preg_match('/^[a-z0-9\_\@\-]+$/i', $elem))
+            {
+                return false;
+            }
+        }
+        return $valid;
+    }
+
+
+    public static function validateHostnameRequired($name, $size = 255)
+    {
+        $valid = preg_match('/^[a-zA-Z][a-zA-Z0-9]*(\-[a-zA-Z0-9]+)*(\.[a-zA-Z0-9]+(\-[a-zA-Z0-9]+)*)*$/i', $name);
+        if ($valid && (strlen($name) <= $size)) {
+            foreach (split("\.", $name) as $item) {
+                if (strlen($item) > 64) {
+                    $valid = false;
+                    break;
+                }
+            }
+        } else {
+            $valid = false;
+        }
+        return $valid;
+    }
+
+    public static function validateNameRequired($name)
+    {
+        //TODO Dejamos que metan tildes?
+        return preg_match('/^[a-zA-ZñÑáéíóèìòù0-9\-\'\.\ \,]+$/i', $name) && strlen($name) < 150;
+    }
+
+    public static function validateName($name)
+    {
+        if($name== '')
+        {
+            return true;
+        }
+
+        return preg_match('/^[a-zA-ZñÑáéíóèìòù0-9\-\'\.\,\ ]+$/i', $name) && (strlen($name) < 150);
+    }
+
+    public static function validatePrivateIp($ip, $range=null)
+    {
+        return (
+            (
+                empty($range) or
+                (!empty($range) and preg_replace('/\.[0-9]+\.[0-9]+\.[0-9]+$/', '', $ip) == preg_replace('/\.[0-9]+\.[0-9]+\.[0-9]+\/[0-9]+$/', '', $range))
+            ) 
+            and
+            (
+                preg_match('/^10(\.25[0-5]|\.2[0-4][0-9]|\.[01]?[0-9][0-9]?){3}$/', $ip) or
+                preg_match('/^192\.168(\.25[0-5]|\.2[0-4][0-9]|\.[01]?[0-9][0-9]?){2}$/', $ip) or
+                preg_match('/^172(\.1[6-9]|\.2[0-9]|\.3[01])(\.25[0-5]|\.2[0-4][0-9]|\.[01]?[0-9][0-9]?){2}$/', $ip)
+            )
+        );
+
+    }
+
+    public static function validateIp($ip)
+    {
+        //return preg_match( "/^(([1-9]?[0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5]).){3}([1-9]?[0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$/");
+        return filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4);
+    }
+
+    public static function validateIpv6($ip)
+    {
+        return filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6);
+    }
+
+    /**
+     * Generate a random password for the client
+     */
+    public static function generatePassword()
+    {
+        $chars = "abcdefghijkmnopqrstuvwxyz023456789";
+        $i = 0;
+        $pass = '';
+        while($i <= 10)
+        {
+            $num = rand() % 33;
+            $tmp = substr($chars, $num, 1);
+            $pass = $pass . $tmp;
+            $i++;
+        }
+
+        return $pass;
+    }
+
+    public function generateRandomString($length = 10)
+    {
+        $characters = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+        srand((double)microtime()*1000000);
+        $randomString = '';
+
+        for ($i = 0; $i < $length; $i++)
+        {
+           $randomString .= $characters[rand(0, strlen($characters) - 1)];
+        }
+
+        return $randomString;
+    }
+
+    /**
+     * Generate the username for the client
+     */
+    public static function generateUsername($name)
+    {
+        $username = $name;
+        $idUsername = 1;
+        $user = sfGuardUserPeer::retrieveByName($username);
+        while(!empty($user))
+        {
+            $username = $name.$idUsername;
+            $user = sfGuardUserPeer::retrieveByName($username);
+            $idUsername++;
+        }
+
+        return $username;
+    }
+
+    public static function validateInstanceNameRequired($name, $size=255)
+    {
+        return preg_match('/^[a-zA-Z0-9\-_]+$/i', $name) && strlen($name) <= $size;
+    }
+
+    public static function cipherApiPassword($api_password)
+    {
+        if (!defined('KEY_MCRYPT_RIJNDAEL_128')) {
+            throw new Exception("Constant KEY_MCRYPT_RIJNDAEL_128 not defined in includes/config.php");
+        }
+        $iv_size = mcrypt_get_iv_size(MCRYPT_RIJNDAEL_128, MCRYPT_MODE_CBC);
+        $iv = mcrypt_create_iv($iv_size, $source=MCRYPT_DEV_URANDOM);
+        $key = hex2bin(KEY_MCRYPT_RIJNDAEL_128);
+        $api_password_enc = mcrypt_encrypt(MCRYPT_RIJNDAEL_128, $key, $api_password, MCRYPT_MODE_CBC, $iv);
+        return base64_encode($iv . $api_password_enc);
+    }
+
+    public static function decipherApiPassword($api_password)
+    {
+        if (!defined('KEY_MCRYPT_RIJNDAEL_128')) {
+            throw new Exception("Constant KEY_MCRYPT_RIJNDAEL_128 not defined in includes/config.php");
+        }
+        $chunkypassword = base64_decode($api_password);
+        $iv_size = mcrypt_get_iv_size(MCRYPT_RIJNDAEL_128, MCRYPT_MODE_CBC);
+        $key = hex2bin(KEY_MCRYPT_RIJNDAEL_128);
+        $iv = substr($chunkypassword, 0, $iv_size);
+        $cipherpassword = substr($chunkypassword, $iv_size);
+        $result = rtrim(mcrypt_decrypt(MCRYPT_RIJNDAEL_128, $key, $cipherpassword, MCRYPT_MODE_CBC, $iv));
+        return $result;
+    }
+}
