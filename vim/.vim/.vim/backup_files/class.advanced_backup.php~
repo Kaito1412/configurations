@@ -16,6 +16,7 @@ class GIGAS_AdvancedBackupModel
 
     public function get_config()
     {
+        die("hola");
         $q = $this->db->prepare("SELECT * FROM gigas_backup_advanced WHERE account_id = ?");
         $q->execute(array($this->account_id));
         $backup_config = $q->fetch(PDO::FETCH_ASSOC);
@@ -28,16 +29,7 @@ class GIGAS_AdvancedBackupModel
     public function set_config($params, $manager_url='')
     {
         $q = $this->db->prepare("INSERT INTO gigas_backup_advanced (account_id, dc_account_id, vlan_account_id, password, manager_url)  VALUES (?, ?, ?, ?, ?)");
-        try {
-            $q->execute(array($this->account_id, $params['dc_account_id'], $params['vlan_account_id'], $params['password'], $manager_url));
-        } catch (Exception $e) {
-            hbm_log_error("sorpresa");
-            var_dump($this->account_id);
-            var_dump($params);
-            var_dump($manager_url);
-            var_dump($e);
-            die("asdd");
-        }
+        $q->execute(array($this->account_id, $params['dc_account_id'], $params['vlan_account_id'], $params['password'], $manager_url));
 
         if($q->rowCount() == 0)
         {

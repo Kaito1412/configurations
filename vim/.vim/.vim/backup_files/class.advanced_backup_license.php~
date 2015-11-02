@@ -1,0 +1,133 @@
+<?php
+
+
+class GIGAS_AdvancedBackupLicenseModel
+{
+    public function __construct($id = null)
+    {
+        $this->db = Engine::singleton()->getObject("db");
+        $this->config = $this->get_config();
+        die("hola");
+        $this->license = null;
+
+        if (!is_null($id)) {
+            $q = $this->db->prepare(
+                'SELECT lic.id, acc.order_id, lic.license_key FROM hb_accounts acc ' .
+                ' JOIN gigas_licenses lic ON acc.id = lic.account_id AND lic.status = ?' .
+                ' WHERE acc.id = ?'
+            );
+            $q->execute(array('Active', $id));
+            $this->license = $q->fetch(PDO::FETCH_ASSOC);
+            $q->closeCursor();
+        }
+    }
+
+    # TODO: Quitar el create de MAPP y traerlo aquí
+    #public function create() {
+    #}
+
+    public function delete()
+    {
+        if (!empty($this->license)) {
+            $response = $this->do_call(
+                'licensing.deletePooledLicense',
+                array($this->config['pool']['pool_id'],
+                $this->license['license_key'])
+            );
+
+            if ($response and xmlrpc_is_fault($reponse)) {
+                if (strpos($response['faultString'], 'Pooled license not found')) {
+                    #Engine::singleton()->addError('License not found|La licencia no existe');
+                    return null;
+                }
+            } elseif ($response == '1') {
+                $q = $this->db->prepare('UPDATE gigas_licenses SET status = ? WHERE id = ?');
+                $q->execute(array('Cancelled', $this->license['id']));
+                $q->closeCursor();
+
+                #Engine::singleton()->addInfo(
+                #    'License successfuly deleted|' .
+                #    'La licencia ha sido eliminada correctamente'
+                #);
+                return true;
+            }
+        }
+
+        #Engine::singleton()->addError('License can not be deleted|La licencia no ha podido ser eliminada');
+        return false;
+    }
+
+    public function upgrade($virtual_servers)  # $virtual_servers es el núm de servers que queremos subir o bajar
+    {
+        if (!empty($this->license)) {
+            $response = $this->do_call(
+                'licensing.upgradePooledLicense',
+                array($this->license['license_key'], array('Virtual Servers' => $virtual_servers))
+            );
+
+            if ($response and xmlrpc_is_fault($reponse)) {
+                if (strpos($response['faultString'], 'Pooled license not found')) {
+                    #Engine::singleton()->addError('License not found|La licencia no existe');
+                    return false;
+                }
+            } elseif (array_key_exists('ID', $response) and $response['ID'] == $this->license['license_key']) {
+                #Engine::singleton()->addInfo(
+                #    'License successfuly upgraded|' .
+                #    'La licencia ha sido actualizada correctamente'
+                #);
+                return true;
+            }
+        }
+
+        #Engine::singleton()->addError('License can not be upgraded|La licencia no ha podido ser actualizada');
+        return false;
+    }
+
+    private function get_config()
+    {
+        $environ = ($_SERVER['SERVER_NAME'] == 'gigas.com') ? 'L' : 'D';
+        $q = $this->db->prepare('SELECT * FROM gigas_idera_servers WHERE environ = ?');
+        $q->execute(array($environ));
+        $server = $q->fetch(PDO::FETCH_ASSOC);
+
+        $q = $this->db->prepare('SELECT * FROM gigas_idera_license_pools WHERE server_id = ? AND enabled = 1');
+        $q->execute(array($server['id']));
+        $pool = $q->fetch(PDO::FETCH_ASSOC);
+
+        $q->closeCursor();
+        $server['pool'] = $pool;
+        return $server;
+    }
+
+    private function do_call($method, $params)
+    {
+        $request = xmlrpc_encode_request($method, $params);
+        $header[] = "Content-type: text/xml";
+        $header[] = "Content-length: ".strlen($request);
+        $auth = $this->config['username'].":".$this->config['password'];
+ 
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
+        curl_setopt($ch, CURLOPT_USERPWD, $auth);
+        curl_setopt($ch, CURLOPT_URL, $this->config['url']);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, $header);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $request);
+        $data = curl_exec($ch);
+
+        if (curl_errno($ch)) {
+            error_log(print_r(curl_error($ch), true));
+            $data = array();
+        } else {
+            $data = xmlrpc_decode($data);
+
+            if ($data and xmlrpc_is_fault($data)) {
+                error_log(print_r($response, true));
+            }
+        }
+
+        curl_close($ch);
+        return $data;
+    }
+}

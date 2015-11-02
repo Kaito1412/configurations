@@ -1,328 +1,100 @@
-# Django settings for gigas_mapp project.
-import os.path
+"""
+Configuration file that defines the templates-specific behavior
+"""
 
-DEBUG = True  # True
-TEMPLATE_DEBUG = DEBUG
-# INTERNAL_IPS = ('127.0.0.1',)
+from django.conf import settings
 
-# are we sending real licenses?
-LIC_ENV = 0
+# i18n
+DEFAULT_LANGUAGE = 'es'
+DEFAULT_COUNTRY = 'ES'
+DEFAULT_CURRENCY = 'EUR'
+DEFAULT_DECIMALS = 1
 
-AES_KEY = '7a445e3c84b5528b0ea21b803b38a458'
+DEFAULT_COUNTRIES = {
+    'es': 'ES',
+    'en': 'GB',
+    }
 
-ADMINS = (
-    ('Gigas Dev Team', 'devs@gigas.com'),
-)
+LATAM = ['CU', 'DO', 'PR', 'BZ', 'CR', 'SV', 'GT', 'HN', 'MX', 'NI', 'PA',
+         'AR', 'BO', 'CL', 'CO', 'EC', 'GY', 'PY', 'PE', 'SR', 'UY', 'VE']
 
-MANAGERS = ADMINS
+COUNTRY_INFO = {
+    "ES": {"language": "es", "currency": "EUR"},
+    "BR": {"language": "en", "currency": "USD"},
+    "US": {"language": "en", "currency": "USD"},
+    # The special ones ;)
+    "LATAM": {"language": "es", "currency": "USD", "variant": "co"},
+    "ROTW": {"language": "en", "currency": "EUR"},
+    }
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'db.backends.gigas',
-        'NAME': 'hostbill',  # illukz',
-        'USER': 'root',
-        'PASSWORD': 'root',
-        'HOST': 'db_mysql',
-        'PORT': '3306',
+COUNTRIES = set(COUNTRY_INFO.keys())
+LANGUAGES = set([lang['language'] for lang in COUNTRY_INFO.values()])
+CURRENCIES = set([lang['currency'] for lang in COUNTRY_INFO.values()])
+ROOT_COUNTRIES = set(LATAM + [DEFAULT_COUNTRY])
+
+KAYAKO_LANG_ID = {"es": 7, "en": 1}
+KAYAKO_FAQ_ID = {"es": 4, "en": 15}
+
+# Caching
+CACHING = not settings.TEMPLATE_DEBUG
+CACHE_TIMEOUT = 86400
+INVALIDATE_BROWSERS_CACHE = True
+CACHE_PARAMETERS = ['country', 'cur']
+
+# Tpl
+TEMPLATE_PATH = 'www'
+DEFAULT_INDEX = 'index.html'
+
+RETRY_AFTER_SECONDS = 900
+
+FORMS_SETTINGS = {
+    "max_errors": 4,
+    "contact-form-iframe.html": {
+        "subject": "Solicitud de Contacto",
+        "email": {
+            "from": "devs@gigas.com",
+            "to": "devs@gigas.com",
+        }
     },
-    'int': {
-        'ENGINE': 'db.backends.gigas',
-        'NAME': 'hostbill',  # 'hb_abel',  # illukz',
-        'USER': 'root',  # 'root',
-        'PASSWORD': 'root',  # 'mysql0verm0de',
-        'HOST': 'db_mysql',
-        'PORT': '',
+    "contact.html": {
+        "subject": "Solicitud de Contacto",
+        "email": {
+            "from": "devs@gigas.com",
+            "to": "devs@gigas.com",
+        }
     },
-    'dev': {
-        'ENGINE': 'db.backends.gigas',
-        'NAME': 'hostbill',  # 'hb_abel',  # illukz',
-        'USER': 'root',  # 'root',
-        'PASSWORD': 'root',  # 'mysql0verm0de',
-        'HOST': 'db_mysql',
-        'PORT': '',
+    "contact-form.html": {
+        "subject": "Solicitud de Contacto",
+        "email": {
+            "from": "devs@gigas.com",
+            "to": "devs@gigas.com",
+        }
     },
-}
-
-BANK_CREDENTIALS = {
-    'caixabank': {
-        'host': 'x.x.x.x',
-        'port': '22',
-        'user': 'xxxxxxxx',
-        'password': 'xxxxxxxx',
+    "trial-iframe.html": {
+        "subject": "Solicitud de Prueba para Cloud Datacenter",
+        "email": {
+            "from": "devs@gigas.com",
+            "to": "devs@gigas.com",
+        }
+    },
+    "trial-form.html": {
+        "subject": "Solicitud de Prueba para Cloud Datacenter",
+        "email": {
+            "from": "devs@gigas.com",
+            "to": "devs@gigas.com",
+        }
+    },
+    "disaster-recovery-form.html": {
+        "subject": "Formulario de solicitud de Disaster & Recovery",
+        "email": {
+            "from": "devs@gigas.com",
+            "to": "devs@gigas.com",
+        }
     }
 }
 
-
-ONAPP_DATABASES = {
-    'onapp': {
-        'hal': {
-            'username': 'toni.valverde',  # user
-            'password': 'my$$',  # password
-            'dbname': 'onapp',
-            'dbhostname': '10.0.40.10',  # hostname
-        },
-        'hal2': {
-            'username': 'toni.valverde',  # user
-            'password': 'my$$',  # password
-            'dbname': 'onapp',
-            'dbhostname': '10.0.40.20',  # hostname
-        },
-    },
-    'gigas_hal': {
-        'hal': {             # hostname
-            'username': 'toni.valverde',  # user
-            'password': 'my$$',  # password
-            'dbname': 'gigas_hal',
-            'dbhostname': 'db_mysql',  # hostname
-        },
-        'hal2': {
-            'username': 'toni.valverde',  # user
-            'password': 'my$$',  # password
-            'dbname': 'gigas_hal',
-            'dbhostname': 'db_mysql',  # hostname
-        },
-    }
-}
-# Local time zone for this installation. Choices can be found here:
-# http://en.wikipedia.org/wiki/List_of_tz_zones_by_name
-# although not all choices may be available on all operating systems.
-# On Unix systems, a value of None will cause Django to use the same
-# timezone as the operating system.
-# If running in a Windows environment this must be set to the same as your
-# system time zone.
-TIME_ZONE = 'Europe/Madrid'
-
-# Language code for this installation. All choices can be found here:
-# http://www.i18nguy.com/unicode/language-identifiers.html
-LANGUAGE_CODE = 'es-es'
-
-SITE_ID = 1
-
-# If you set this to False, Django will make some optimizations so as not
-# to load the internationalization machinery.
-USE_I18N = True
-
-# If you set this to False, Django will not format dates, numbers and
-# calendars according to the current locale
-USE_L10N = True
-
-# Absolute filesystem path to the directory that will hold user-uploaded files.
-# Example: "/home/media/media.lawrence.com/media/"
-MEDIA_ROOT = os.path.join(os.path.dirname(__file__), 'media').replace('\\', '/')
-
-# URL that handles the media served from MEDIA_ROOT. Make sure to use a
-# trailing slash.
-# Examples: "http://media.lawrence.com/media/", "http://example.com/media/"
-MEDIA_URL = '/media/'
-
-# Absolute path to the directory static files should be collected to.
-# Don't put anything in this directory yourself; store your static files
-# in apps' "static/" subdirectories and in STATICFILES_DIRS.
-# Example: "/home/media/media.lawrence.com/static/"
-# Only test
-# STATIC_ROOT = os.path.join(os.path.dirname(__file__), 'static').replace('\\', '/')
-STATIC_ROOT = '/var/www/gigas_mapp/static/'
-
-# URL prefix for static files.
-# Example: "http://media.lawrence.com/static/"
-STATIC_URL = '/static/'
-
-# URL prefix for admin static files -- CSS, JavaScript and images.
-# Make sure to use a trailing slash.
-# Examples: "http://foo.com/static/admin/", "/static/admin/".
-# ADMIN_MEDIA_PREFIX = '/static/admin/'
-
-# Additional locations of static files
-STATICFILES_DIRS = (
-    # Put strings here, like "/home/html/static" or "C:/www/django/static".
-    # Always use forward slashes, even on Windows.
-    # Don't forget to use absolute paths, not relative paths.
-)
-
-# List of finder classes that know how to find static files in
-# various locations.
-STATICFILES_FINDERS = (
-    'django.contrib.staticfiles.finders.FileSystemFinder',
-    'django.contrib.staticfiles.finders.AppDirectoriesFinder',
-    #'django.contrib.staticfiles.finders.DefaultStorageFinder',
-)
-
-# Make this unique, and don't share it with anybody.
-SECRET_KEY = 'nul)wv=tkkj)o-3+o# ujnd-*vwc3b$&=q# mwhpyb*erd(7b$4='
-
-# List of callables that know how to import templates from various sources.
-TEMPLATE_LOADERS = (
-    'django.template.loaders.filesystem.Loader',
-    'django.template.loaders.app_directories.Loader',
-#     'django.template.loaders.eggs.Loader',
-)
-
-MIDDLEWARE_CLASSES = (
-    'django.middleware.common.CommonMiddleware',
-    'django.contrib.sessions.middleware.SessionMiddleware',
-    'django.middleware.csrf.CsrfViewMiddleware',
-    'django.contrib.auth.middleware.AuthenticationMiddleware',
-    'django.contrib.messages.middleware.MessageMiddleware',
-    'django.middleware.doc.XViewMiddleware',
-)
-
-ROOT_URLCONF = 'urls'
-
-TEMPLATE_DIRS = (
-    # Put strings here, like "/home/html/django_templates" or "C:/www/django/templates".
-    # Always use forward slashes, even on Windows.
-    # Don't forget to use absolute paths, not relative paths.
-    os.path.join(os.path.dirname(__file__), 'templates').replace('\\', '/'),
-)
-
-INSTALLED_APPS = (
-    'django.contrib.auth',
-    'django.contrib.contenttypes',
-    'django.contrib.sessions',
-    'django.contrib.sites',
-    'django.contrib.messages',
-    # 'django.contrib.staticfiles',
-    'django.contrib.admin',
-    'django.contrib.admindocs',
-    # 'django.contrib.databrowse',
-    # 'debug_toolbar',
-    'transfer',
-    'email_template',
-    'clients',
-    'accounts',
-    'domains',
-    'invoices',
-    'orders',
-    'modules',
-    'products',
-    'stats',
-    'main',
-    'onapp',
-    'kayako',
-    'plesk',
-    'logs',
-    'frauds',
-    'hal',
-    'adyen',
-    'gigas_web',
-    'apps',
-    'support_form',
-    'reports',
-    'i18n',
-    'support',
-    'promotions',
-    'idera',
-    'accounting',
-    # 'django_extensions',
-    'daterange_filter',
-    'licenses',
-    'professional_services',
-    'seafile',
-    'apipass',
-    'hblanguages'
-)
-
-LOGGING = {
-    'version': 1,
-    'disable_existing_loggers': True,
-    'formatters': {
-        'standard': {
-            'format': "[%(asctime)s] %(levelname)s [%(name)s:%(lineno)s] %(message)s",
-            'datefmt': "%d/%b/%Y %H:%M:%S"
-        },
-    },
-    'handlers': {
-        'null': {
-            'level': 'DEBUG',
-            'class': 'django.utils.log.NullHandler',
-        },
-        'transferlog': {
-            'level': 'DEBUG',
-            'class': 'logging.FileHandler',
-            'filename': os.path.join(os.path.dirname(__file__), 'django_transfer.log'),
-            'formatter': 'standard',
-        },
-        'logfile': {
-            'level': 'INFO',
-            'class': 'logging.handlers.RotatingFileHandler',
-            'filename': os.path.join(os.path.dirname(__file__), 'django.log'),
-            'maxBytes': 50000,
-            'backupCount': 2,
-            'formatter': 'standard',
-        },
-        'console': {
-            'level': 'INFO',
-            'class': 'logging.StreamHandler',
-            'formatter': 'standard'
-        },
-        'console-debug': {
-            'level': 'DEBUG',
-            'class': 'logging.StreamHandler',
-            'formatter': 'standard'
-        },
-    },
-    'loggers': {
-        'django': {
-            'handlers': ['console', 'logfile'],
-            'level': 'WARN',
-            'propagate': True,
-        },
-        'django-debug': {
-            'handlers': ['console-debug'],
-            'level': 'DEBUG',
-            'propagate': False,
-        },
-        'django.db.backends': {
-            'handlers': ['console'],
-            'level': 'DEBUG',
-            'propagate': False,
-        },
-        'resellerclub': {
-            'handlers': ['console'],
-            'level': 'DEBUG',
-            'propagate': False,
-        },
-    }
-}
-
-EMAIL_HOST = 'smtp.gmail.com'
-EMAIL_PORT = '587'
-EMAIL_USE_TLS = True
-EMAIL_HOST_USER = 'abel.gonzalez@gigas.com'
-EMAIL_HOST_PASSWORD = 'gigas001'
-
-API_BILLING_HOST = 'http://hapi:9000/billing'
-API_BILLING_USER = 'carlos.mateu'
-API_BILLING_PASS = 'password'
-
-ALLOWED_HOSTS = ['127.0.0.1', 'localhost', 'david.mapp.gigas.local']
-HOSTBILL_HOST = 'http://david.gigas.local/panel'
-
-PS_ADDON_ID = [32, 130, 131, 86, 85, 63, 62]
-PS_EXCLUDE_KARMA4 = [157, 162]
-
-SEAFILE_LIBRARY = "be8eaa13-a661-4609-b394-50021a75ee8b"
-PS_TAG_PREFIX = "ps_"
-PS_DEPT_LIST = [8, 31, 12, 16, 20, 32, 46, 24, 26, 34, 29,
-                38, 39, 40, 42, 43, 44, 45, 47, 48, 49,
-                50, 51, 52]
-PS_STATUS_LIST = [2, 20, 22, 18, 12, 10, 14, 16, 24, 58,
-                  61, 64, 67, 70, 52, 73, 54, 74, 75, 76,
-                  77, 78, 79, 80, 81, 82, 83, 85, 86, 87,
-                  88, 89, 90, 91, 92, 93, 94]
-NOTA_LENGTH = 128
-
-# por orden, el indice indica el karma
-KAYAKO_KARMA_IDS = 26, 25, 17, 27, 16, 24
-
-# id del grupo de permisos de django. tabla auth_group
-DJANGO_USER_GROUPS = {
-    'sales': 5,
-    'finance': 7,
-}
-
-# id de modulos de hostbill
-HB_MODULES = {
-    'gigashosting': 96,
-}
-KEY_MCRYPT_RIJNDAEL_128 = 'f92be113d60ccf765857362a23614b202840e93b89f88b2736698e609a334c3e'
+HTTP_PROXY = '10.0.32.12:8080'
+USER_PROXY = 'carlos.mateu@gigas.com'
+PASS_PROXY = '/Kaneda287.gigas'
+RECAPTCHA_PRIVATE_KEY = '6LeDReMSAAAAALfVlp5j4EOJEpEq2Hrlha3zp1fE'
+RECAPTCHA_PUBLIC_KEY = '6LeDReMSAAAAANcvLmmkxnCjzsvjpFjiblvNqrTY'

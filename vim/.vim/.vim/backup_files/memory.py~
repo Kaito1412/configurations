@@ -4,11 +4,11 @@ class Memory:
     
     @classmethod
     def total(self):
-        return self._toMB(psutil.virtual_memory().total)
+        return psutil.virtual_memory().total
 
     @classmethod
     def used(self):
-        return self._toMB(psutil.virtual_memory().used)
+        return psutil.virtual_memory().used
 
     @classmethod
     def percent(self):
@@ -16,15 +16,12 @@ class Memory:
 
     @classmethod
     def swap_total(self):
-        return self._toMB(psutil.swap_memory().total)
+        return psutil.swap_memory().total
 
     @classmethod
     def swap_used(self):
-        return self._toMB(psutil.swap_memory().used)
+        return psutil.swap_memory().used
 
     @classmethod
     def swap_percent(self):
         return psutil.swap_memory().percent
-
-    def _toMB(self, bytesValue):
-        return bytesValue * 1024**2 

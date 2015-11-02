@@ -7,6 +7,7 @@ from ghostbill.serializers import (ModelSerializer,
 from accounts.models import (Account, AccountAddon, CancelRequest,
                              decipherApiPassword)
 import logging
+import json
 
 
 class AccountSerializer(ModelSerializer):
@@ -16,6 +17,15 @@ class AccountSerializer(ModelSerializer):
         "option102": "api_user_id",
     }
 
+    def to_representation(self, instances):
+        for instance in instances.object:
+            try:
+                self(instance)
+            except TypeError:
+                logging.exception("Account {0} is not serializable".format(instance.id))
+                instances.object._result_cache.remove(instance)
+        return instances.data
+
     def transform_extra_details(self, obj, value):
         opdict = php_to_list_translated(value,
                                         translate_with=self.KEY_TRANSLATION,
@@ -24,9 +34,9 @@ class AccountSerializer(ModelSerializer):
 
         try:
             if obj.extra_details and 'option103' in opdict:
-                del opdict['option103']
                 opdict['api_password'] = decipherApiPassword(
                     opdict['api_password']).decode('utf-8')
+                del opdict['option103']
         except TypeError:
             logging.exception('Unexpected extra_details value for account %s',
                               obj.id)
@@ -91,6 +101,7 @@ class AccountSerializer(ModelSerializer):
                              'domain_error',
                              'notes',
                              'manual',)
+
 
 class AccountAddonSerializer(ModelSerializer):
     creation_date = serializers.DateTimeField(source="regdate")

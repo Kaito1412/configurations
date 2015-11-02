@@ -1,0 +1,64 @@
+/**
+  @module modelSqlite
+  Al arrancar el servidor crea las tablas necesarias para la aplicación si no
+  existieran. También crea tres usuarios para demos.
+*/
+
+var sqlite3 = require('sqlite3');
+var config = require('../config');;
+
+var db = new sqlite3.Database(config.database);
+
+db.serialize(function() {
+    db.run("CREATE TABLE IF NOT EXISTS calls (\
+                id INTEGER PRIMARY KEY,\
+                GCIDCallId TEXT,\
+                CallLegId TEXT,\
+                origin TEXT,\
+                toCall TEXT,\
+                date TEXT,\
+                duration TEXT,\
+                path TEXT)");
+
+    db.run("CREATE TABLE IF NOT EXISTS users (\
+                id INTEGER PRIMARY KEY AUTOINCREMENT,\
+                username NCHAR(55) NOT NULL,\
+                email NCHAR(55) UNIQUE NOT NULL,\
+                role NCHAR(30) NOT NULL DEFAULT 'user',\
+                password NCHAR(55) NOT NULL,\
+                registerDate DATE NOT NULL)");
+
+    db.run("CREATE TABLE IF NOT EXISTS extensions (\
+                id INTEGER PRIMARY KEY AUTOINCREMENT,\
+                extension NCHAR(55) NOT NULL,\
+                description NCHAR(500) NOT NULL)");
+
+    db.run("CREATE TABLE IF NOT EXISTS userExt (\
+                userID INT NOT NULL,\
+                extID INT NOT NULL,\
+                FOREIGN KEY(userID) REFERENCES users(id),\
+                PRIMARY KEY (userID, extID))");
+
+    db.run("CREATE TABLE IF NOT EXISTS errorCalls (\
+                id INTEGER PRIMARY KEY AUTOINCREMENT,\
+                date TEXT NOT NULL,\
+                error TEXT NOT NULL)");
+
+    var nowDate = new Date().toISOString().replace(/T/, ' ').replace(/\..+/, '');
+    db.run("INSERT OR IGNORE INTO users(id,  username, email, role, password, registerDate)\
+            VALUES(0, 'admin', 'main.admin@neat-group.com', 'admin', '6355790f1a2b3f44c0b9c76a98639960', ?)", nowDate);
+
+    var nowDate = new Date().toISOString().replace(/T/, ' ').replace(/\..+/, '');
+    db.run("INSERT OR IGNORE INTO users(id, username, email, role, password, registerDate)\
+            VALUES(1, 'admin', 'admin@neat-group.com', 'admin', '6355790f1a2b3f44c0b9c76a98639960', ?)", nowDate);
+
+    var nowDate = new Date().toISOString().replace(/T/, ' ').replace(/\..+/, '');
+    db.run("INSERT OR IGNORE INTO users(id, username, email, password, registerDate)\
+            VALUES(2, 'user', 'user@neat-group.com', '6355790f1a2b3f44c0b9c76a98639960', ?)", nowDate);
+
+/*    db.run("INSERT OR IGNORE INTO userExt(userID, extID)\
+            VALUES(2, 0)");
+
+    db.run("INSERT OR IGNORE INTO userExt(userID, extID)\
+            VALUES(813, 1412)");   */
+});

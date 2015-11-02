@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="es"  class="no-js" >
+  <head>
+  
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">  	
+    <meta name="description" content="error 404"> 
+    <title>404</title>
+    <script type="text/javascript" src="/static/js/modernizr.min.js" ></script>
+    <!--[if lt IE 8]>
+    <link href="/static/css/bootstrap-ie7.css" rel="stylesheet">
+	<![endif]-->
+    
+	<link href="/static/css/slick.css" rel="stylesheet">
+    <!-- Bootstrap -->
+    <link href="/static/css/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/jquery-ui.min.css" />
+    <link rel="stylesheet" href="/static/css/jquery-ui.structure.min.css" />
+    <link rel="stylesheet" href="/static/css/jquery-ui.theme.min.css" />
+
+    <!--[if lt IE 9]>
+      <script src="https://oss.maxcdn.com/libs/html5shiv/3.7.0/html5shiv.js"></script>
+      <script src="/static/js/respond.min.js"></script>
+    <![endif]-->
+    <script type="text/javascript">
+
+	 var _gaq = _gaq || [];
+	 _gaq.push(['_setAccount', 'UA-21188421-1']);
+	 _gaq.push(['_addIgnoredOrganic', 'gigas.com']);
+	 _gaq.push(['_addIgnoredOrganic', 'www.gigas.com']);
+	 _gaq.push(['_addIgnoredOrganic', 'gigas']);
+	 _gaq.push(['_addIgnoredOrganic', 'gigas hosting']);
+	 _gaq.push(['_trackPageview']);
+	
+	 (function() {
+		   var ga = document.createElement('script'); ga.type = 'text/javascript'; ga.async = true;
+		   ga.src = ('https:' == document.location.protocol ? 'https://ssl' : 'http://www') + '.google-analytics.com/ga.js';
+		   var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(ga, s);
+	 })();
+	
+	</script>
+    
+  </head>
+
+<body style="background-color:#151515">
+<section class="error centered-txt mainclouds">
+	<div class="container"> 
+    <div class="col-md-6">   	
+        <p class="errornumber">404</p>
+        <p>ERROR</p>
+        <div class="margin-error info-error">
+        	<h4>The Page Does Not Exist</h4><br>        
+        </div>
+    </div>
+    <div class="col-md-6">
+         <div class="margin-error">
+            <h3>Make your choice</h3>
+            <div class="col-xs-6">            	
+            	<a id="redpill" href="#"><img src="/static/images/redpill.png"></a>
+                <small>Red Pill</small>
+                <ul id="redpillchoice" class="hiddenchoice">
+                	<div class="timearrow"></div>                	
+                	<li><a href="{{ link_prefix }}/cloud-datacenter">Cloud Datacenter</a></li>
+                    <li><a href="{{ link_prefix }}/cloud-vps">Cloud VPS</a></li>
+                 </ul>
+            </div>              
+            
+            <div class="col-xs-6">            	
+                <a id="bluepill" href="#"><img src="/static/images/bluepill.png"></a>
+                <small>Blue Pill</small>
+                	<ul id="bluepillchoice" class="hiddenchoice">
+                    	<div class="timearrow"></div>
+                        <li><a href="{{ link_prefix }}/">Home</a></li>                        
+                    </ul>
+                </div>
+            </div>
+        </div>
+      </div>  
+    </div>
+</section>
+
+<script src="/static/js/jquery.min.js"></script>
+<script src="/static/js/bootstrap.min.js"></script>
+<script>
+$('#redpill').click(function(e){ 
+	$('#redpillchoice').toggle();
+	e.preventDefault();
+});
+$('#bluepill').click(function(e){ 
+	$('#bluepillchoice').toggle();
+	e.preventDefault();
+});
+</script>
+</body>
+</html>

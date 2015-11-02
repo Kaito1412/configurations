@@ -1,0 +1,265 @@
+# -*- coding: utf-8 -*-
+from sqlalchemy import Table, Column, DateTime, Text, Integer, String, ForeignKey, Enum, Boolean, UniqueConstraint
+from sqlalchemy.orm import relationship, synonym
+from sqlalchemy.ext.hybrid import hybrid_property
+from managers.db.base import base_get_session, UtilsMixin
+from managers.db.base import DeclarativeBase_console as DeclarativeBase
+from managers.libs.auth import create_password, test_passwords, create_2w_message, retrieve_2w_message
+import json
+from datetime import datetime
+
+
+def get_session(console=0):
+    return base_get_session("api", console)()
+
+metadata = DeclarativeBase.metadata
+
+user_rol = Table('user_rol', metadata,
+                Column('api_user_id', Integer, ForeignKey('api_users.id')),
+                 Column('rol_id', Integer, ForeignKey('roles.id')))
+
+
+class ApiUser(DeclarativeBase, UtilsMixin):
+    __tablename__ = "api_users"
+    __table_args__ = (
+        UniqueConstraint('console_id',
+                         'cloud_id',
+                         name='constraint_console_id_cloud_id_unique'),
+        {"mysql_engine": "InnoDB"})
+    _json_placeholders = {'extra_info': [], 'base_resource_id': 1, 'role': 1}
+    _json_blacklist = ["password", "console_login", "console_password"]
+
+    id = Column(Integer(), primary_key=True, nullable=False)
+    console_id = Column(Integer(), ForeignKey("consoles.id", ondelete="SET NULL"))
+    login = Column(String(40), nullable=False, unique=True)
+    _password = Column(u"password", String(128), nullable=False)
+    #rol_id
+    status = Column(Enum("Active", "Suspended", "Cancelled"), nullable=False, default="Active")
+    suspended_at = Column(DateTime())
+    _console_login = Column(u"console_login", String(128), nullable=False)
+    _console_password = Column(u"console_password", String(128), nullable=False)
+    cloud_id = Column(Integer(), nullable=False)
+    karma = Column(Integer(), default=0, server_default="0", nullable=False)
+
+    def __init__(self, *argv, **kwargs):
+        if "password" in kwargs:
+            kwargs['_password'] = create_password(kwargs.pop("password"))
+
+        if "console_login" in kwargs:
+            kwargs['_console_login'] = create_2w_message(kwargs.pop("console_login"))
+
+        if "console_password" in kwargs:
+            kwargs['_console_password'] = create_2w_message(kwargs.pop("console_password"))
+
+        super(ApiUser, self).__init__(*argv, **kwargs)
+
+    @hybrid_property
+    def password(self):
+        return self._password
+
+    @password.setter
+    def password(self, new_password):
+        self._password = create_password(new_password)
+
+    @hybrid_property
+    def console_password(self):
+        if self._console_password is not None:
+            return retrieve_2w_message(self._console_password)
+        return None
+
+    @console_password.setter
+    def console_password(self, new_password):
+        self._console_password = create_2w_message(new_password)
+
+    @hybrid_property
+    def console_login(self):
+        if self._console_login is not None:
+            return retrieve_2w_message(self._console_login)
+        return None
+
+    @console_login.setter
+    def console_login(self, new_login):
+        self._console_login = create_2w_message(new_login)
+
+    #relationships
+    tags = relationship("UserTag", backref="user")
+    roles = relationship("Rol", secondary=user_rol, backref="users")
+
+    def validate(self, raw_pw):
+        return test_passwords(raw_pw, self._password)
+
+
+class Console(DeclarativeBase, UtilsMixin):
+    __tablename__ = "consoles"
+    __table_args__ = {"mysql_engine": "InnoDB"}
+
+    id = Column(Integer(), primary_key=True, nullable=False)
+    ip_address = Column(String(39))
+    console_group_id = Column(Integer(), ForeignKey("console_groups.id", ondelete="SET NULL"))
+    label = Column(String(255))
+    status = Column(Enum("On", "Off"), nullable=False, default="Off")
+    provider = Column(Enum("onapp", "ovm"), nullable=False, default="onapp",
+                      server_default="onapp")
+
+    #relationships
+    users = relationship("ApiUser", backref="console")
+    tags = relationship("ConsoleTag", backref="console")
+
+
+class ConsoleGroup(DeclarativeBase, UtilsMixin):
+    __tablename__ = "console_groups"
+    __table_args__ = {"mysql_engine": "InnoDB"}
+
+    id = Column(Integer(), primary_key=True, nullable=False)
+    label = Column(String(255))
+
+    #relationships
+    consoles = relationship("Console", backref="console_group")
+
+
+class UserTag(DeclarativeBase, UtilsMixin):
+    __tablename__ = "user_tags"
+    __table_args__ = {"mysql_engine": "InnoDB"}
+
+    id = Column(Integer(), primary_key=True, nullable=False)
+    label = Column(String(255), nullable=False)
+    user_id = Column(Integer(), ForeignKey("api_users.id", ondelete="SET NULL"))
+
+    #relationships
+
+
+class ConsoleTag(DeclarativeBase, UtilsMixin):
+    __tablename__ = "console_tags"
+    __table_args__ = {"mysql_engine": "InnoDB"}
+
+    id = Column(Integer(), primary_key=True, nullable=False)
+    label = Column(String(255), nullable=False)
+    console_id = Column(Integer(), ForeignKey("consoles.id", ondelete="SET NULL"))
+
+    #relationships
+
+rol_permits = Table('rol_permits', metadata,
+                    Column('rol_id', Integer, ForeignKey('roles.id')),
+                    Column('permission_id', Integer, ForeignKey('permissions.id')),
+                    UniqueConstraint('rol_id', 'permission_id', name='_rol_permission_uc'))
+
+
+class Rol(DeclarativeBase, UtilsMixin):
+    __tablename__ = "roles"
+    __table_args__ = {"mysql_engine": "InnoDB"}
+
+    id = Column(Integer(), primary_key=True, nullable=False)
+    label = Column(String(255), nullable=False, unique=True)
+
+    #relationships
+    permissions = relationship('Permission', secondary=rol_permits, backref='roles')
+
+
+class Permission(DeclarativeBase, UtilsMixin):
+    __tablename__ = "permissions"
+    __table_args__ = (UniqueConstraint('url', 'method', 'admin', name='_url_method_uc'), {"mysql_engine": "InnoDB"})
+
+    id = Column(Integer(), primary_key=True, nullable=False)
+    url = Column(String(255), nullable=False)
+    method = Column(String(10), nullable=False)
+    allow = Column(Boolean, nullable=False, default=True)
+    admin = Column(Boolean, nullable=False, default=False)
+    description = Column(String(512))
+
+
+class ExecutorTransaction(DeclarativeBase, UtilsMixin):
+    __tablename__ = "executor_transactions"
+    __table_args__ = {"mysql_engine":"InnoDB"}
+
+    id = Column(Integer(), primary_key=True, nullable=False)
+    console_id = Column(Integer(), nullable=False) #futuro FK
+    api_user_id = Column(Integer()) #futuro FK
+    #cloud_id = Column(Integer()) #futuro FK
+    action = Column(String(255), nullable=False)
+    _status = Column(r'status', Enum('Pending', 'Running', 'Cancelled', 'Failed', 'Completed', 'Working_on_it'), nullable=False, index=True, default='Pending')
+    token = Column(String(255), nullable=False)
+    priority = Column(Integer())
+    created_at = Column(DateTime(), default=datetime.utcnow)
+    started_at = Column(DateTime())
+    updated_at = Column(DateTime(), default=datetime.utcnow, onupdate=datetime.utcnow)
+    finished_at = Column(DateTime())
+
+    start_after = Column(DateTime())
+
+    def _set_status(self, new_status):
+        self._status = new_status
+        if new_status == 'Running':
+            self.started_at = datetime.utcnow()
+        elif new_status in ['Cancelled', 'Failed', 'Completed']:
+            self.finished_at = datetime.utcnow()
+
+    def _get_status(self):
+        return self._status
+
+    status = property(_get_status, _set_status)
+    status = synonym("_status", descriptor=status)
+    
+
+class ExecutorTask(DeclarativeBase, UtilsMixin):
+    __tablename__ = "executor_tasks"
+    __table_args__ = {"mysql_engine":"InnoDB"}
+
+    id = Column(Integer(), primary_key=True, nullable=False)
+    #user_id = Column(Integer(), ForeignKey("api_users.id", ondelete="SET NULL"))
+    console_id = Column(Integer(), nullable=False) # futura FK a cloud
+    api_user_id = Column(Integer()) #futuro FK
+    #cloud_id = Column(Integer()) # futura FK a cloud
+    transaction_id = Column(Integer(), ForeignKey("executor_transactions.id", ondelete="CASCADE"))
+    parent_id = Column(Integer(), ForeignKey("executor_tasks.id", ondelete="SET NULL"))
+    locked_by = Column(Integer(), ForeignKey("executor_tasks.id", ondelete="SET NULL"))
+    action = Column(String(255), nullable=False)
+    
+    target_type = Column(Enum('Disk', 'Hypervisor', 'Backup', 'Template', 'NetworkInterface', 'Network', 'VirtualMachine'), nullable=False)
+    target_id = Column(Integer(), nullable=False)
+    
+    _status = Column(r'status', Enum('Pending', 'Running', 'Cancelled', 'Failed', 'Completed'), nullable=False, default='Pending')
+    _params = Column(r'params', Text())
+    pid = Column(Integer())
+    priority = Column(Integer(), nullable=False, default=30)
+
+    created_at = Column(DateTime(), default=datetime.utcnow)
+    started_at = Column(DateTime())
+    updated_at = Column(DateTime(), default=datetime.utcnow, onupdate=datetime.utcnow)
+    finished_at = Column(DateTime())
+        
+    log_output = Column(Text())
+    
+    allowed_cancel = Column(Integer(), default=0)
+
+    def _set_status(self, new_status):
+        self._status = new_status
+        if new_status == 'Running':
+            self.started_at = datetime.utcnow()
+        elif new_status in ['Cancelled', 'Failed', 'Completed']:
+            self.finished_at = datetime.utcnow()
+
+    @hybrid_property
+    def status(self):
+        self._set_status(self._status)
+        return self._status
+
+    def _get_params(self):
+        try:
+            return json.loads(self._params)
+        except (ValueError, TypeError):
+            return {}
+
+    def _set_params(self, parameters_dictionary):
+        if parameters_dictionary is None:
+            return {}
+        elif hasattr(parameters_dictionary, 'keys'):
+            self._params = json.dumps(parameters_dictionary)
+        else:
+            raise TypeError("parameters must be a dictionary")
+            
+    
+    params = property(_get_params, _set_params)
+    params = synonym("_params", descriptor=params)
+    
+    #relationship
+    transaction = relationship("ExecutorTransaction", backref="tasks")

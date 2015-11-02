@@ -1,31 +1,13 @@
-'use strict';
+var Blog = Backbone.Model.extend({
+    defaults: {
+        id: '',
+        content: ''
+    }
+});
 
-/**
- * @ngdoc overview
- * @name 04TodoApp
- * @description
- * # 04TodoApp
- *
- * Main module of the application.
- */
-angular
-  .module('04TodoApp', [
-    'ngAnimate',
-    'ngCookies',
-    'ngResource',
-    'ngRoute',
-    'ngSanitize',
-    'ngTouch',
-    'ui.sortable'
-  ])
-  .config(function ($routeProvider) {
-    $routeProvider
-      .when('/', {
-        templateUrl: 'views/main.html',
-        controller: 'MainCtrl',
-        controllerAs: 'main'
-      })
-      .otherwise({
-        redirectTo: '/'
-      });
-  });
+var Blogs = Backbone.Collection.extend({});
+
+var blog1 = new Blog({id: 1, content: 'hello'});
+var blog2 = new Blog({id: 2, content: 'adios'});
+
+var blogs = new Blogs([blog1, blog2]);

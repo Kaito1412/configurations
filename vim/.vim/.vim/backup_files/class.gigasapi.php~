@@ -1,5 +1,8 @@
 <?php
 
+require_once "libs/Utils.php";
+require_once MAINDIR . 'includes/gigas_constants.php';
+
 
 class GigasApiException extends Exception
 {
@@ -59,7 +62,11 @@ class GigasApi
         if (!empty($connection['extra_details']['option100'])) {
             $this->is_admin = false;
             $this->login = $connection['extra_details']['option100'];
-            $this->password = $connection['extra_details']['option101'];
+            if (!empty($connection['extra_details']['option103'])) {
+                $this->password = GigasUtilities::decipherApiPassword($connection['extra_details']['option101']);
+            } else {
+                $this->password = $connection['extra_details']['option101'];
+            }
         } else {
             $this->is_admin = !array_key_exists('order_id', $connection);
             $this->login = $connection['username'];
@@ -74,6 +81,7 @@ class GigasApi
             $connection['secure'] = $server['server']['secure'];
         }
 
+        die("hola");
         $this->base_url = (($connection['secure'] == 0) ? 'http' : 'https') . '://' . $connection['host'];
     }
 
@@ -120,8 +128,7 @@ class GigasApi
         if ($http_code >= 400) {
             throw new GigasApiException($result, $http_code);
         }
-        
-        file_put_contents("/tmp/put2", $http_code, FILE_APPEND);
+
         return new GigasApiResponse($result, $http_code);
     }
 
@@ -297,7 +304,7 @@ class GigasApi
             $std_disk_max = 0;
             $std_disk_total = 0;
             foreach ($resources['DataStoreGroup'] as $data_store_group) {
-                if ($data_store_group['group_id'] == HP_DS_TIER_ID) {
+                if ($data_store_group['group_id'] == DataStores::HIGH_PERFORMANCE_ID) {
                     $disk_total += $data_store_group['limit'];
                     $disk_max += max($data_store_group['limit'] - $data_store_group['used'], 0);
                 } else {
@@ -329,9 +336,9 @@ class GigasApi
 
         if (empty($resources)) {
             try {
-                // HP_DS_TIER_ID is the default disk tier
+                // HIGH_PERFORMANCE_ID is the default disk tier
                 $resources = $this->get_resources('DiskSize');
-                $resources['group_id'] = HP_DS_TIER_ID;
+                $resources['group_id'] = DataStores::HIGH_PERFORMANCE_ID;
             } catch (Exception $e) {
                 hbm_log_error('An error occurred while trying to access client resources');
                 throw new Exception('An error occurred while trying to access client resources');
@@ -461,37 +468,67 @@ EOF;
         if (!empty($vlan_id)) {
             $network_group_label = $this->gen_network_group_label($client_id, $vlan_id);
             $network_label = $this->gen_network_label($client_id, $vlan_id);
-            $networks = $this->get('/networks', array('vlan' => $vlan_id))->json();
+            try {
+                $networks = $this->get('/networks', array('vlan' => $vlan_id))->json();
+            } catch (Exception $e) {
+                hbm_log_error('An error ocurred while trying to access networks');
+                throw new Exception('An error ocurred while trying to access networks');
+            }
             if (is_array($networks) && !empty($networks)) {
                 $network = $networks[0];
             } else {
-                $network_groups = $this->get('/network_groups', array('label' => $network_group_label))->json();
-                if (is_array($network_groups) && !empty($network_groups)) {
-                    $network_group = $network_groups[0];
-                } else {
-                    $network_group = $this->post('/network_group', array('label' => $network_group_label))->json();
+                try {
+                    $network_groups = $this->get('/network_groups', array('label' => $network_group_label))->json();
+                    if (is_array($network_groups) && !empty($network_groups)) {
+                        $network_group = $network_groups[0];
+                    } else {
+                        $network_group = $this->post('/network_group', array('label' => $network_group_label))->json();
+                    }
+                } catch (Exception $e) {
+                    hbm_log_error('An error ocurred while trying to access network_groups');
+                    throw new Exception('An error ocurred while trying to access network_groups');
                 }
                 $network_params = array(
                     'label' => $network_label,
                     'network_group_id' => $network_group['id'],
                     'vlan' => $vlan_id,
                 );
-                $network = $this->post('/network', $network_params)->json();
+                try {
+                    $network = $this->post('/network', $network_params)->json();
+                } catch (Exception $e) {
+                    hbm_log_error('An error ocurred while trying to access networks');
+                    throw new Exception('An error ocurred while trying to access networks');
+                }
             }
         } else {
             $tmp_network_group_label = $this->gen_network_group_label($client_id);
             $tmp_network_label = $this->gen_network_label($client_id);
-            $network_group = $this->post('/network_group', array('label' => $tmp_network_group_label))->json();
+            try {
+                $network_group = $this->post('/network_group', array('label' => $tmp_network_group_label))->json();
+            } catch (Exception $e) {
+                hbm_log_error('An error ocurred while trying to access network_group');
+                throw new Exception('An error ocurred while trying to access network_group');
+            }
             $network_params = array(
                 'label' => $tmp_network_label,
                 'public' => 0,
                 'network_group_id' => $network_group['id'],
             );
-            $network = $this->post('/network', $network_params)->json();
+            try {
+                $network = $this->post('/network', $network_params)->json();
+            } catch (Exception $e) {
+                hbm_log_error('An error ocurred while trying to access networks');
+                throw new Exception('An error ocurred while trying to access networks');
+            }
             $network_group_label = $this->gen_network_group_label($client_id, $network['vlan']);
             $network_label = $this->gen_network_label($client_id, $network['vlan']);
-            $this->put('/network_group/' . $network_group['id'], array('label' => $network_group_label));
-            $this->put('/network/' . $network['id'], array('label' => $network_label));
+            try {
+                $this->put('/network_group/' . $network_group['id'], array('label' => $network_group_label));
+                $this->put('/network/' . $network['id'], array('label' => $network_label));
+            } catch (Exception $e) {
+                hbm_log_error('An error ocurred while trying to put network/network_group');
+                throw new Exception('An error ocurred while trying to put network/network_group');
+            }
         }
         return $network;
     }
@@ -509,6 +546,7 @@ EOF;
             hbm_log_error(
                 "Permission on network group $network_group_id to api user $api_user_id could not be created"
             );
+            throw new Exception('An error ocurred while trying to access api_user');
         }
     }
 }

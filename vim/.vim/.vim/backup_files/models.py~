@@ -1,611 +1,1018 @@
 # -*- coding: utf-8 -*-
-import os.path
-import re
-import random
-import string
-import datetime
-import MySQLdb as Database
-from pycurl import error as pycurl_error
-from warnings import filterwarnings
-from phpserialize import loads
 import logging
+import datetime
+from lxml import etree
+import MySQLdb as Database
 
-from django.utils.encoding import smart_str
-from django.db import models, connection
+from django.db import models
 from django.core import urlresolvers
-from django.db.models.loading import get_model
-from django.core.mail import send_mail
-from django.db.models import Avg
+from django.utils.encoding import smart_str
+from django.core.validators import ValidationError
 from django.contrib.auth.models import User
+from django.core.mail import send_mail
+from warnings import filterwarnings
 
-from notes.models import ClientNote
-from main.utils import max_mind_request
-from main.models import AESField
-from hal.models import Hal
-from lib.accounting.banks.iban import iban_validator
-from lib.accounting.banks.iban import swift_validator
-from lib.accounting.banks.iban import swift_is_valid as bic_is_valid
-from lib.accounting.banks.iban import is_valid as iban_is_valid
-from lib.accounting.banks.sepa import SEPA_CORE
-from lib.accounting.banks.sepa import SEPA_B2B
-from lib.accounting.banks.sepa import SEPA_SEQ_TYPE
-from kayako.utils import update_kayako_user_group
-from kayako.utils import get_kayako_group_id_in_kayako
-from .utils import karma_is_full
+from kayako.models import Kayako
+from clients.models import Client
+from plesk.models import Plesk
+from email_template.utils import get_email_template
+from invoices.models import Invoice
+from modules.models import ModuleConfig
+from products.models import Product
+from licenses.plesk_utils import get_plesk_version
+from licenses.utils import get_lic_environment
+from idera.models import LicensePool as IderaLicensePool
 
 
-class ClientManager(models.Manager):
-    def clients_join_values(self):
-        cursor = connection.cursor()
-        cursor.execute("SELECT c.id, v.value FROM hb_client_access AS c JOIN hb_client_fields_values AS v WHERE v.client_id=c.id")
-        objects = cursor.fetchall()
-        return objects
+class Order(models.Model):
+    """
+    Orders by HB. Normally there are three kinds of orders, services,
+    accounts and domains
+    """
+    STATUS = (('Pending', 'Pending'), ('Active', 'Active'),
+              ('Cancelled', 'Cancelled'), ('Fraud', 'Fraud'),
+              ('CloudSales', 'CloudSales'))
 
-class ClientGroup(models.Model):
-    id = models.IntegerField(primary_key=True)
-    name = models.CharField(max_length=127L)
-    description = models.TextField()
-    color = models.CharField(max_length=7L)
-    discount = models.DecimalField(max_digits=12, decimal_places=2)
-    scenario_id = models.IntegerField()   # <---------- PENDING
-    default_priority = models.IntegerField()
-    class Meta:
-        db_table = 'hb_client_group'
-        permissions = (("export_clientgroup", "Can export"),)
-
-
-class Client(models.Model):
-    STATUS = (('Active', 'Active'), ('Inactive', 'Inactive'), ('Closed', 'Closed'), ('Pending', 'Pending'))
-    group = models.ForeignKey(ClientGroup, db_column='group_id')
-    email = models.EmailField()
-    password = models.CharField(max_length=40)
-    lastlogin = models.DateTimeField()
-    ip = models.IPAddressField()
-    host = models.CharField(max_length=100)
-    status = models.CharField(max_length=40, choices=STATUS)
-    objects = ClientManager()
+    number = models.IntegerField(max_length=11)
+    payment_module = models.ForeignKey(
+        ModuleConfig,
+        db_column='payment_module',
+        limit_choices_to={'type_field': 'Payment', 'active': 1},
+        null=True,
+    )
+    client_id = models.ForeignKey(Client, db_column='client_id', null=True)
+    invoice_id = models.ForeignKey(Invoice, db_column='invoice_id', null=True)
+    total = models.FloatField()
+    date_created = models.DateField()
+    status = models.CharField(max_length=20, choices=STATUS, verbose_name='order status')
+    order_ip = models.IPAddressField()
+    notes = models.CharField(max_length=255)
+    metadata = models.TextField()
 
     class Meta:
-        db_table = 'hb_client_access'
-        permissions = (("export_client", "Can export"),)
+        permissions = (("export_order", "Can export"),)
+        db_table = 'hb_orders'
+        ordering = ['-id']
 
     def __unicode__(self):
-        return unicode(self.email)
+        return unicode(self.id)
 
-    def karma(self):
-        return self.clientextradetail.karma
-    karma.admin_order_field = 'clientextradetail__karma'
 
-    def is_dni_fraud(self):
+    def client_country(self):
+        return self.client_id.country()
+
+    def invoice_status(self):
+        invoice_status = self.invoice_id.status
+        if invoice_status == 'Paid':
+            color = 'limegreen'
+        elif invoice_status == 'Unpaid':
+            color = 'red'
+        elif invoice_status == 'Cancelled':
+            color = 'grey'
+        else:
+            color = 'black'
+
+        return '<span style="color: %s">%s</span>' % (color, self.invoice_id.status)
+    invoice_status.allow_tags = True
+    invoice_status.admin_order_field = 'invoice_id__status'
+
+    def account_status(self):
         try:
-            is_fraud = not self.fraud_set.filter(type='Dni')[0].check_result
-            if is_fraud:
-                return 'True'
+            account_statuses = set([a.status
+                                    for a in self.account_set.iterator()])
+            if len(account_statuses) == 1:
+                account_status = account_statuses.pop()
+            elif len(account_statuses) > 1:
+                account_status = ('Pending'
+                                  if 'Pending' in account_statuses
+                                  else account_statuses.pop())
             else:
-                return 'False'
-        except:
-            return 'Unknown'
+                return
 
-    def is_maxmind_fraud(self):
-        try:
-            is_fraud = self.fraud_set.filter(type='Maxmind').order_by('-date_added')[0].check_result
-            if is_fraud:
-                return 'True'
+        except Exception as e:
+            account_status = str(e)
+
+        if account_status == 'Active':
+            color = 'limegreen'
+        elif account_status == 'Pending':
+            color = 'red'
+        elif account_status == 'Cancelled':
+            color = 'grey'
+        else:
+            color = 'black'
+
+        return '<span style="color: %s">%s</span>' % (color, account_status)
+    account_status.allow_tags = True
+    account_status.admin_order_field = 'account__status'
+
+    def order_status(self):
+
+        if self.status == 'Active':
+            color = 'limegreen'
+        elif self.status == 'Pending':
+            color = 'red'
+        elif self.status == 'Cancelled':
+            color = 'grey'
+        else:
+            color = 'black'
+
+        return '<span style="color: %s">%s</span>' % (color, self.status)
+    order_status.allow_tags = True
+    order_status.admin_order_field = 'status'
+
+    def product_name(self):
+        product_name_list = []
+        
+        for acc in self.account_set.all():
+            if "Licencias" in acc.product_id.category_id.name:
+                product_name_list.append(acc.get_complete_product())
             else:
-                return 'False'
+                product_name_list.append(unicode(acc.product_id))
+        else:
+            try:
+                for item in self.invoice_id.get_items():
+                    product_name_list.append(item.description)
+            except Invoice.DoesNotExist:
+                pass
+        product_name = u', '.join(product_name_list)
+        return product_name or None
+
+    def is_idera_upgrade(self):
+        try:
+            return ('Backup' in self.accountaddon_set.get().name)
+
         except:
-            return 'Unknown'
-
-    def get_company(self):
-        field_id = 18
-
-        cursor = connection.cursor()
-        cursor.execute('SELECT value FROM hb_client_fields_values where field_id = %d and client_id = %d LIMIT 1' %( field_id, self.id ))
-        val = cursor.fetchone()
-        if val:
-            return val[0]
-        else:
-            return 'Private'
-
-    @property
-    def companyname(self):
-        try:
-            return smart_str(self.clientfieldvalue_set.get(field_id__code='my-company').value)
-        except:
-            return u''
-
-    def doc_number(self):
-        if self.clientdetail.company:
-            field_id = 17
-        else:
-            field_id = 20
-
-        cursor = connection.cursor()
-        cursor.execute('SELECT value FROM hb_client_fields_values WHERE field_id = %d AND client_id = %d LIMIT 1' %( field_id, self.id ))
-        val = cursor.fetchone()
-        if val:
-            return val[0]
-        else:
-            return None
-
-    def tax_exemp(self):
-        field_id = 24
-
-        cursor = connection.cursor()
-        cursor.execute('SELECT value FROM hb_client_fields_values WHERE field_id = %d AND client_id = %d LIMIT 1' %( field_id, self.id ))
-        val = cursor.fetchone()
-
-        if val:
-            if val[0]:
-                return "SI"
-
-        return ""
-
-    def get_card_number(self):
-        file = open(os.path.join(os.path.dirname(__file__), 'cc.txt').replace('\\', '/'), 'r')
-        hash1 = file.read()
-        cc_hash = hash1.replace("\n", "")
-
-        cursor = connection.cursor()
-        cursor.execute(" SELECT AES_DECRYPT( cardnum,  '" + cc_hash + "' ) AS cardnum, AES_DECRYPT( expdate,  '" + cc_hash + "' )\
-                         AS expdate\
-                         FROM hb_client_billing where client_id = '" + str(self.id) + "'")
-
-        return cursor.fetchone()
-
-    def get_fraud_data(self, cardnum=None, ip=None):
-        out = dict()
-
-        if ip:
-            ip_field = ip
-        else:
-            ip_field = self.ip
-
-        if cardnum:
-            cardnum_field = cardnum
-        else:
-            cardnum_field = self.get_card_number()
-
-        out["license_key"] = "te73UGFrU2yH"
-        out["i"] = ip_field
-        out["city"] = self.clientdetail.city
-        out["region"] = self.clientdetail.state
-        out["postal"] = self.clientdetail.postcode
-        out["country"] = self.clientdetail.country
-        # Recommended fields
-        out["domain"] = self.email.split("@")[1]
-        out["bin"] = cardnum_field[0:6]
-        out["requested_type"] = "premium"
-        out["shipAddr"] = self.clientdetail.address1
-        out["shipCity"] = self.clientdetail.city
-        out["shipRegion"] = self.clientdetail.state
-        out["shipPostal"] = self.clientdetail.postcode
-        out["shipCountry"] = self.clientdetail.country
-
-        return max_mind_request(out)
-
-    def phone(self):
-        return self.clientdetail.phonenumber
-
-    def fullname(self):
-        #return " ".join([self.clientdetail.firstname, self.clientdetail.lastname])
-        return "%s %s" % (smart_str(self.clientdetail.firstname), smart_str(self.clientdetail.lastname))
-
-    def country(self):
-        return self.clientdetail.country
-
-    def notes(self):
-        return ''.join([c.note for c in ClientNote.objects.filter(rel_id=self.id).order_by('date')])
-
-    def credit(self):
-        try:
-            credit = self.clientbilling_set.all()[0].credit
-        except IndexError:
-            credit = 0
-        return credit
-
-    '''
-    def vip_status(self):
-        try:
-            status = "<strong>%s</strong>" % self.clientvip.status
-        except:
-            status = False
-
-        return status
-    vip_status.allow_tags = True
-    '''
-
-    def extratypes(self):
-        extratype_string = ""
-
-        try:
-            extratypes = self.clientextradetail.extratype.all()
-        except ClientExtraDetail.DoesNotExist:
-            pass
-        else:
-            if len(extratypes) > 0:
-                extratype_string = " | ".join([extratype.extratype for extratype in extratypes])
-
-        return extratype_string
-
-    def get_clouds(self, cloud_type="Cloud Datacenter"):
-        accounts = self.account_set.all()
-        accounts = [acc for acc in accounts if acc.product_id.category_id.name == cloud_type]
-
-        return accounts
-
-    def get_vms(self, account=None):
-        if account:
-            auth = (account.username, account.password)
-        else:
-            auth = ()
-        vms = Hal.objects.all()[0].get_data('vm', 'vm', 'list', auth=auth)
-
-        return vms
-
-    def get_biggest_account(self):
-        accs = self.account_set.all()
-        biggest_account = None
-        product_aux = 0
-
-        for acc in accs:
-            if acc.product_id.category_id.name.lower() == 'cloud datacenter':
-                try:
-                    ram = int(acc.product_id.description.split(" | ")[0].replace(" GB", ""))
-                except ValueError:
-                    ram = 0
-                if product_aux < ram and acc.status == 'Active':
-                    product_aux = ram
-                    biggest_account = acc
-
-        return biggest_account
-
-    def datecreated(self):
-        return self.clientdetail.datecreated
-    datecreated.admin_order_field = 'clientdetail__datecreated'
-
-    def get_client_support_notes(self):
-        notas = ', '.join(
-                [c.content for c in self.clientsupportnote_set.all()])
-        return "%s" % notas
-
-    def url_add_client_support_notes(self):
-        #change_url = urlresolvers.reverse('admin:clients_clientsupportnote_add', kwargs={'client_id': self.id,})
-        change_url = urlresolvers.reverse('admin:clients_clientsupportnote_add')
-        return '<a href="%s?client=%s">Nueva</a>' % (change_url, self.id)
-    url_add_client_support_notes.allow_tags = True
-
-    @property
-    def twitter(self):
-        tw = ''
-        try:
-            tw = smart_str(self.clientfieldvalue_set.get(field_id__code='twitter').value)
-        except:
-            pass
-        return tw
-
-    def twitter_link(self):
-        link = ''
-        tw = self.twitter
-        if tw:
-            link = "<a target='_blank' href='http://www.twitter.com/{twitter}'>@{twitter}".format(
-                twitter=tw,
-                )
-        return link
-    twitter_link.allow_tags = True
-
-
-    def income(self):
-
-        invoice = get_model('invoices', 'Invoice')
-        income = invoice.objects.filter(status='Paid', client_id=self.id).aggregate(total=Avg('total'))
-        return round(income.values()[0], 2) if income.values()[0] is not None else 0
-
-
-    def currency(self, field=None):
-
-        currency = get_model('invoices', 'Currency')
-        try:
-            return currency.objects.get(pk=self.clientbilling_set.get().currency_id).iso
-        except (ClientBilling.DoesNotExist, currency.DoesNotExist):
-            return ''
-
-    def parent_link(self):
-        change_url = urlresolvers.reverse('admin:clients_client_change', args=(self.clientdetail.parent_id.id_id,))
-        return '<a href="%s">%s</a>' % (change_url, self.clientdetail.parent_id.id)
-    parent_link.allow_tags = True
-
-    def parent_id(self):
-        return self.clientdetail.parent_id.id
-
-
-class ClientDetail(models.Model):
-    COMPANY = ((1, 'Company'), (0, 'Private'))
-
-    id = models.OneToOneField(Client, primary_key=True, db_column='id')
-    parent_id = models.ForeignKey('self', blank=True, null=True, db_column='parent_id')
-    firstname = models.CharField(max_length=100)
-    lastname = models.CharField(max_length=100)
-    companyname = models.CharField(max_length=100)
-    address1 = models.CharField(max_length=250)
-    address2 = models.CharField(max_length=250)
-    city = models.CharField(max_length=250)
-    state = models.CharField(max_length=250)
-    postcode = models.CharField(max_length=10)
-    country = models.CharField(max_length=250)
-    phonenumber = models.CharField(max_length=20)
-    datecreated = models.DateField()
-    #notes = models.CharField(max_length=250)  <--- moved to hb_notes in hostbill upgrade. now is calculated in self.notes()
-    language = models.CharField(max_length=250)
-    company = models.IntegerField(max_length=1, choices=COMPANY)
-
-    class Meta:
-        db_table = 'hb_client_details'
-        permissions = (("export_clientdetail", "Can export"),)
-
-    def __unicode__(self):
-        return unicode(self.firstname+" "+self.lastname)
-
-    def notes(self):
-        return ''.join([c.note for c in ClientNote.objects.filter(rel_id=self.id.id).order_by('date')])
-
-    def get_doc_no(self):
-        if self.company:
-            field_id = 17
-        else:
-            field_id = 20
-
-        cursor = connection.cursor()
-        cursor.execute('SELECT value FROM hb_client_fields_values WHERE field_id = %d AND client_id = %d LIMIT 1' %( field_id, self.id.id ))
-        val = cursor.fetchone()[0]
-
-        return val
-
-    def is_gigas(self):
-        return self.id.email[-10:] == '@gigas.com'
-
-    def privileges(self):
-        p = loads(self.id.clientprivileges)
-        privileges = ''
-        try:
-            for i in p['services']:
-                privileges += '<b>Account id {0}:</b><br>'.format(i)
-                for action in p['services'][i]:
-                    privileges += ' {0},'.format(action)
-                privileges += '<br><br>'
-        except KeyError:
-            privileges += 'No privileges<br><br>'
-
-        return privileges
-    privileges.allow_tags = True
-
-    def parent(self):
-        change_url = urlresolvers.reverse('admin:clients_client_change', args=(self.parent_id.id_id,))
-        return '<a href="%s">%s</a>' % (change_url, self.parent_id.id)
-    parent.allow_tags = True
-
-class ClientField(models.Model):
-    FIELD_TYPES = (('Select', 'Select'), ('Check', 'Check'), ('Input', 'Input'), ('Password', 'Password'))
-    TYPES = (('Company', 'Company'), ('Private', 'Private'), ('All', 'All'))
-    code = models.CharField(max_length = 32)
-    name = models.CharField(max_length = 32)
-    field_type = models.CharField(max_length = 30, choices = FIELD_TYPES)
-    default_value = models.CharField(max_length = 250)
-    type_field = models.CharField(max_length = 50, db_column = 'type', choices = TYPES)
-    options = models.IntegerField(max_length = 5)
-    description = models.CharField(max_length = 250)
-    sort_order = models.IntegerField(max_length = 11)
-    expression = models.CharField(max_length = 70)
-
-    class Meta:
-        db_table = 'hb_client_fields'
-        permissions = (("export_clientfleild", "Can export"),)
-
-    def __unicode__(self):
-        return unicode(self.code+" "+self.name)
-
-
-class ClientFieldValue(models.Model):
-    client_id = models.ForeignKey(Client, db_column = 'client_id', primary_key=True)
-    field_id = models.ForeignKey(ClientField, db_column = 'field_id', primary_key=True)
-    value = models.CharField(max_length = 250)
-
-    class Meta:
-        db_table = 'hb_client_fields_values'
-        unique_together = ("client_id", "field_id")
-        permissions = (("export_clientfieldvalue", "Can export"),)
-
-    def __unicode__(self):
-        return unicode(self.client_id)
-
-
-
-class ClientBilling(models.Model):
-    CARDTYPES = (('Visa','Visa'), ('MasterCard', 'MasterCard'),
-            ('Discover', 'Discover'), ('American', 'American'),
-            ('Express', 'Express'), ('Laser', 'Laser'),
-            ('Maestro', 'Maestro'))
-    client = models.ForeignKey(Client, db_column='client_id')
-    credit = models.DecimalField(max_digits=10, decimal_places=2)
-    taxexempt = models.IntegerField(max_length=1)
-    latefeeoveride = models.IntegerField(max_length=1)
-    overideduenotices = models.IntegerField(max_length=1)
-    cardtype = models.CharField(max_length=20, choices=CARDTYPES)
-    cardnum = models.TextField()
-    expdate = models.TextField()
-    currency_id = models.IntegerField(max_length=11)
-    token = models.TextField()
-    token_gateway_id = models.IntegerField()
-
-    class Meta:
-        db_table = 'hb_client_billing'
-        permissions = (("export_clientbilling", "Can export"),)
-
-    def __unicode__(self):
-        return unicode(self.client)
-
-
-class ClientExtraType(models.Model):
-    extratype = models.CharField(max_length=100,  null=True, blank=True)
-
-    class Meta:
-        db_table = 'gigas_client_extratype'
-        permissions = (("export_clientextratype", "Can export"),)
-
-    def __unicode__(self):
-        return unicode(self.extratype)
-
-class ClientExtraDetail(models.Model):
-    TIMEZONE_CHOICES = tuple([(i, "GMT%+d" % i) for i in range(-12,15)])
-
-    client = models.ForeignKey(Client, db_column='client_id', primary_key=True)
-    #client = models.OneToOneField(Client, db_column='client_id', null=True, blank=True)
-    karma = models.IntegerField(max_length=11, default=0) # este campo ya no debe usarse DEPRECATED
-    kayako_id = models.IntegerField(max_length=11, null=True, blank=True)
-    timezone = models.IntegerField(max_length=1, choices=TIMEZONE_CHOICES, default=0) 
-    trusted_payer = models.BooleanField(default=False)
-    extratype = models.ManyToManyField(ClientExtraType, null=True, blank=True)
-    adyen_expiry_date = models.DateField(null=True, blank=True)
-
-    def has_adhoc(self):
-        """ tiene un karma puesto manualmente? """
-        return self.karma in [3, 5]
-    has_adhoc.boolean = True
-    has_adhoc.admin_order_field = 'karma'
-
-    class Meta:
-        db_table = 'gigas_client_extradetails'
-        permissions = (("export_clientextradetail", "Can export"),)
-
-    def __unicode__(self):
-        return unicode(self.client)
-
-    def save(self, *args, **kwargs):
-        """ override this to synch kayako with self.karma """
-        filterwarnings('ignore', category=Database.Warning)
-        try:
-            orig = ClientExtraDetail.objects.get(pk=self.id)
-        except ClientExtraDetail.DoesNotExist:
-            pass
-        else:
-            if orig.karma != self.karma: # karma has changed ?
-                if (self.client.clientdetail.parent_id_id or 
-                    not karma_is_full(self.karma)):
-                    new_group_id = get_kayako_group_id_in_kayako(self.karma)
-                    _ = update_kayako_user_group(self.client, new_group_id)
-                else:
-                    self.karma = orig.karma
-                    logging.info("karma was not saved probably "
-                                  "because karma group is full")
-        super(ClientExtraDetail, self).save(*args, **kwargs)
-
-
-class ClientBillingExtra(models.Model):
-    DIRECTDEBIT_CHOICES = ((0, 'Manual'), (1, 'Auto'))
-    SEPA_CHOICES = ((SEPA_CORE, SEPA_CORE), (SEPA_B2B, SEPA_B2B))
-    SEPA_CHOICES_DEFAULT = SEPA_CORE
-    SEPA_SEQ_TYPE_CHOICES = tuple(zip(SEPA_SEQ_TYPE.values(), SEPA_SEQ_TYPE.keys()))
-
-    client = models.OneToOneField(Client, db_column='client_id', related_name='billing_extra', verbose_name='client id')
-    direct_debit = models.IntegerField(max_length=1, choices=DIRECTDEBIT_CHOICES, default=0, verbose_name='Provision')
-    ccc = AESField(max_length=100, default=None, blank=False, null=True, verbose_name='IBAN', validators=[iban_validator])
-    bic = models.CharField(max_length=100, null=True, blank=False, verbose_name='SWIFT/BIC', validators=[swift_validator])
-    sepa = models.CharField(max_length=100, null=True, blank=True, choices=SEPA_CHOICES, default=SEPA_CHOICES_DEFAULT)
-    mandate = models.CharField(max_length=100, null=True, blank=True)
-    mandate_date = models.DateField(blank=True, null=True, default=datetime.date(2009,10,31))
-    mandate_sequence_type = models.CharField(max_length=100, null=True, blank=True, choices=SEPA_SEQ_TYPE_CHOICES)
-
-    class Meta:
-        db_table = 'gigas_client_billing_extra'
-        permissions = (("export_clientbillingextra", "Can export"),)
-
-    def __unicode__(self):
-        return unicode(self.client)
-
-    def save(self, *args, **kwargs):
-        filterwarnings('ignore', category=Database.Warning)
-        if self.pk is not None:
-            orig = ClientBillingExtra.objects.get(pk=self.pk)
-            if orig.mandate != self.mandate:
-                self.mandate_sequence_type = SEPA_SEQ_TYPE['first']
-        super(ClientBillingExtra, self).save(*args, **kwargs) # Call the "real" save() method.
-
-    def client_email_link(self):
-        change_url = urlresolvers.reverse('admin:clients_client_change', args=(self.client.id,))
-        return '<a href="%s">%s</a>' % (change_url, self.client.email)
-    client_email_link.allow_tags = True
-
-    def client_id_link(self):
-        change_url = urlresolvers.reverse('admin:clients_client_change', args=(self.client.id,))
-        return '<a href="%s">%s</a>' % (change_url, self.client.id)
-    client_id_link.allow_tags = True
-
-    def iban_is_valid(self):
-        return iban_is_valid(self.ccc)
-
-    def bic_is_valid(self):
-        return bic_is_valid(self.bic)
-
-
-class ClientSupportNote(models.Model):
-    client = models.ForeignKey(Client, db_column='client_id')
-    TYPES = (('Calidad', 'Calidad'),)
-    type = models.CharField(max_length=50, choices=TYPES, default='Calidad')
-    content = models.CharField(max_length=255)
-
-    class Meta:
-        db_table = 'gigas_client_support_notes'
-        permissions = (("export_clientsupportnote", "Can export"),)
-
-    def __unicode__(self):
-        return unicode(self.type)
+            return False
+
+    # Admin links
+    def invoice_link(self):
+        change_url = urlresolvers.reverse('admin:invoices_invoice_change',
+                                          args=(self.invoice_id.id,))
+
+        return '<a href="%s">%s</a>' % (change_url, self.invoice_id.id)
+    invoice_link.allow_tags = True
 
     def client_link(self):
-       change_url = urlresolvers.reverse('admin:clients_client_change', args=(self.client.id,))
-       return '<a href="%s">%s</a>' % (change_url, self.client.email)
+        change_url = urlresolvers.reverse('admin:clients_client_change',
+                                          args=(self.client_id.id,))
+
+        return '<a href="%s">%s</a>' % (change_url, self.client_id)
     client_link.allow_tags = True
 
-    def edit_link(self):
-        change_url = urlresolvers.reverse('admin:clients_clientsupportnote_change', args=(self.id,))
-        return '<a href="%s">Editar</a>' % (change_url)
-    edit_link.allow_tags = True
+    def licenses(self):
+        license_accounts = self.account_set.filter(
+            models.Q(license__isnull=False) |
+            models.Q(product_id__category_id__name__icontains='licencia'))
+
+        licenses_list = []
+        pending_licenses = False
+
+        for license_account in license_accounts:
+            license = (license_account.license_set.get()
+                       if license_account.license_set.exists()
+                       else None)
+            if license:
+                if license.status == "Active":
+                    licenses_list.append("<strong>{0}</strong>"
+                                         .format(license.license_key))
+                elif license.status == "Cancelled":
+                    licenses_list.append("<strong>{0} Cancelled</strong>"
+                                         .format(license.license_key))
+                elif license.status == 'Created':
+                    pending_licenses = True
+
+                else:
+                    licenses_list.append("{0} {1}"
+                                         .format(license.license_key,
+                                                 license.status))
+            else:
+                if license_account.get_license_type():
+                    try:
+                        pending_licenses = self.invoice_id.status == 'Paid'
+                    except Invoice.DoesNotExist:
+                        pending_licenses = True
+
+        if pending_licenses:
+            change_url = "#send_license-" + str(self.client_id.id)
+            licenses_list.append(
+                '<a href="%s" class="license_link" >%s</a>'
+                '<label class="lic-info"></label>' % (
+                    change_url,
+                    "Enviar licencia/s pendiente/s"))
+
+        return '<br />'.join(licenses_list)
+    licenses.allow_tags = True
+
+    def license_key(self):
+        if self.is_license():
+            orderlicenses = self.orderlicense_set.all()
+            return orderlicenses[0].license_key
+
+        else:
+            return ''
+
+    def upgrade_license(self):
+        try:
+            accadd = self.accountaddon_set.get()
+
+        except self.accountaddon_set.model.DoesNotExist:
+            logging.error('Order %s is not an addon account' % self.id)
+            return False
+
+        if self.status != 'Pending':
+            logging.error('Order %s is %s' % (self.id, self.status))
+            return False
+
+        try:
+            license_key = self.accountaddon_set.get().account_id.order_id.orderlicense_set.get().license_key
+
+        except:
+            logging.error('Order %s, license not found' % self.id)
+            return False
+
+        key = IderaLicensePool.objects.filter(
+                    enabled=True,
+                    server__environ=get_lic_environment()
+                ).latest('id').upgrade_license(license_key)
+
+        if key is not None:
+            client = self.client_id.clientdetail
+            kayako = Kayako.objects.all()[0]
+
+            ticket_status_id = 14
+            department_id = 32
+            ticket_type_id = 4
+            ticket_priority_id = 2
+
+            ticket = kayako.send_staff_ticket('license:idera_upgrade', client,
+                    ticket_status_id=ticket_status_id, department_id=department_id,
+                    ticket_type_id=ticket_type_id, ticket_priority_id=ticket_priority_id,
+                    content_params={"firstname": client.firstname, "license": license_key,
+                        "virtual_servers": key['Virtual Servers']})
+
+            #if ticket is not None:
+            #    send_mail()
+
+            self.status = 'Active'
+            self.save()
+
+            accadd = self.accountaddon_set.get()
+            accadd.status = 'Active'
+            accadd.save()
+
+            return True
+
+        else:
+            return False
+
+    def send_license(self, license, version=None):
+        """
+        envia la licencia
+        """
+        try:
+            account = self.account_set.all()[0]
+        except IndexError:
+            logging.error("Fallo al tomar los datos del account en send_license")
+            return "Fallo al tomar los datos del account"
+
+        resp_text = "Result: "
+        product_obj = account.product_id
+        product_complete = account.get_complete_product()
+        client = self.client_id.clientdetail
+
+        # Buscamos una licencia ya creada con ese order
+        # La encontraremos solo en caso de que anteriormente fallara el envio a kayako
+        try:
+            order_license = self.orderlicense_set.get(
+                product_id=product_obj,
+                status__in=['Created', 'Active'])
+        except self.orderlicense_set.model.DoesNotExist:
+            order_license = None
+
+        # Si ya está activa salimos
+        if order_license and order_license.status == 'Active':
+            resp_text = "Previously Active License: " + order_license.license_key
+            license_key = order_license.license_key
+            return resp_text
+
+        if order_license and order_license.status == 'Created' and 'Backup' in product_complete:
+            license_type = "Idera"
+            license_key = order_license.license_key
+            logging.info("retrieved previously created idera Key")
+
+        elif 'Backup' in product_complete:
+            try:
+                key = IderaLicensePool.objects.filter(
+                    enabled=True,
+                    server__environ=get_lic_environment()
+                ).latest('id').create_license()
+            except IderaLicensePool.DoesNotExist:
+                resp_text += 'Idera license pool not found'
+                return resp_text
+
+            license_type = "Idera"
+            license_key = key['ID']
+            logging.info("retrieved new idera Key")
+
+        elif order_license and order_license.status == 'Created' and "Plesk" in product_complete:
+            # RetrieveKey
+            plesk = Plesk.objects.get(environ=get_lic_environment())
+            key = plesk.retrieveKey(key=order_license.license_key)
+            if not key['key']:
+                logging.error("error retrieving previously created Plesk Key")
+                return "License error"
+            license_type = "Plesk"
+            license_key = key['license']
+            logging.info("retrieves previously created Plesk Key")
+
+        elif "Plesk" in product_complete:
+            windows_keytype = False
+            if 'Windows' in product_complete:
+                windows_keytype = True
+            plesk = Plesk.objects.get(environ=get_lic_environment())
+            key = plesk.retrieveKey(
+                license_type=get_plesk_version(self),
+                doms=license,
+                windows=windows_keytype
+            )
+            if not key['key']:
+                logging.error("error retrieving Plesk Key")
+                return "License error"
+            license_type = "Plesk"
+            license_key = key['license']
+            logging.info("retrieves Key Plesk")
+
+        elif order_license and order_license.status == 'Created' and "Windows" in product_complete:
+            key = order_license.license_key
+            license_type = "Windows"
+            license_key = order_license.license_key
+            logging.info("retrieves previously created Win Key")
+
+        elif "Windows" in product_complete:
+            logging.info("retrieves Key Windows")
+            license_type = "Windows"
+            try:
+                license_filter = license.split("_")
+
+                if len(license_filter) == 1:
+                    winlicense = WinLicense.objects.filter(license_type__icontains=license_filter[0])[0]
+                elif len(license_filter) == 2:
+                    winlicense = WinLicense.objects.filter(license_type__icontains=license_filter[0]).filter(license_type__icontains=license_filter[1])[0]
+
+            except IndexError:
+                logging.error("El tipo de licencia no existe")
+                resp_text += "Ese tipo de licencia no existe"
+                return resp_text
+            key = winlicense.key
+            license_key = winlicense.key
+            winlicense.count += 1
+            winlicense.save()
+
+        else:
+            logging.error("License {0} type is unknown and will be ignored".format(product_complete))
+            return ''
+
+        # Si no tenemos ya orderlicense la añadimos como "Created"
+        if not order_license:
+            self.orderlicense_set.create(
+                product_id=product_obj,
+                license_key=license_key,
+                license_type=license_type,
+                status='Created')
+            #order_license = OrderLicense(
+            #    order_id=self,
+            #    product_id=product_obj,
+            #    license_key=license_key,
+            #    license_type=license_type,
+            #    status='Created')
+            order_license.save()
+
+        #Get existing users
+        kayako = Kayako.objects.all()[0]
+        found = kayako.get_user(email=client.id.email)
+        logging.error("user check")
+
+        #Check if exists
+        if found:
+            logging.error("Inside user exists")
+            resp_text += "El usuario ya existia"
+        else:
+            logging.error("Inside create user")
+            resp_text += "El usuario no existia"
+            values = kayako.create_user_by_client_id(self.client_id.id)
+            try:
+                user_values = etree.fromstring(values)
+            except etree.XMLSyntaxError, e:
+                msg = "Error al crear el usuario %s: %s" % (client.id.email, values)
+                logging.error(msg)
+                resp_text += msg
+                send_mail("Fallo al crear usuario %s en Kayako" % (client.id.email),
+                          resp_text, "gigas@gigas.com",
+                          ["devs@gigas.com", "javier.navarro@gigas.com", "root@gigas.com"])
+                return resp_text
+            found = user_values.find("user/id").text
+
+        logging.error("User check passed")
+
+        logging.info("ckeck staff")
+
+        #License sent TODO Provisional
+        # El status id "4", en dev tiene que ser "2" sino peta
+        if "Idera" in license_type:
+            logging.error("Enters send Idera Mail")
+            mail = get_email_template('license:idera', client.id)
+            if mail is None:
+                logging.error("Template license:idera not found")
+            ticket = kayako.new_ticket(
+                subject=smart_str(mail.subject),
+                fullname="Gigas Support",  # client.id.email,
+                email=client.id.email,
+                contents=smart_str(mail.message) % {"firstname": smart_str(client.firstname), "license": smart_str(license_key)},
+                departmentid="32",
+                ticketstatusid="14",
+                ticketpriorityid="2",
+                tickettypeid="4",
+            )
+
+        elif "Plesk" in license_type:
+            logging.error("Enters send Plesk Mail")
+            mail = get_email_template('license:plesk', client.id)
+            if mail is None:
+                logging.error("Template license:plesk not found")
+            ticket = kayako.new_ticket(
+                subject=smart_str(mail.subject) % {"license": smart_str(license)},
+                fullname="Gigas Support",  # client.id.email,
+                email=client.id.email,
+                contents=smart_str(mail.message) % {"firstname": smart_str(client.firstname), "license": smart_str(license)},
+                departmentid="32",
+                ticketstatusid="10",
+                ticketpriorityid="2",
+                tickettypeid="4",
+            )
+
+        elif "Windows" in license_type:
+            logging.error("Enters send Windows Mail")
+            mail = get_email_template('license:windows', client.id)
+            if mail is None:
+                logging.error("Template license:windows not found")
+            ticket = kayako.new_ticket(
+                subject=smart_str(mail.subject),
+                fullname="Gigas Support",  # client.id.email,
+                email=client.id.email,
+                contents=smart_str(mail.message) % {"firstname": smart_str(client.firstname), "license": smart_str(license)},
+                departmentid="32",
+                ticketstatusid="14",
+                ticketpriorityid="2",
+                tickettypeid="4",
+            )
+
+        logging.error(ticket)
+        logging.error("Acaba envio de ticket")
+
+        try:
+            t = etree.fromstring(ticket)
+
+        except etree.XMLSyntaxError:
+            logging.error("Error en el parseo del XML de vuelta de envio de ticket")
+            resp_text += "Error en el parseo del XML. Pongase en contacto con el responsable de soporte"
+            return resp_text
+
+        tick_dict = dict()
+        for tick in t.getiterator():
+            for elem in tick.getiterator():
+                if elem.tag == 'ticketpostid' or elem.tag == 'ticketid':
+                    tick_dict[elem.tag] = elem.text
+
+        resp_text += " Ticket Sent"
+        logging.error("Ticket Sent")
+
+        #Attach License
+        if license_type == "Plesk":
+            logging.error("Entra adjunto de Plesk")
+            file_name = "plesk_key.xml"
+            key_content = str(key['key'])
+            license_key = key['license']
+        elif license_type == "Windows":
+            logging.error("Entra adjunto de Windows")
+            file_name = "windows_key.html"
+            key_content = smart_str(get_email_template(tplname="winlicticket", client=client.id).message) % {"win_key": str(key)}
+            license_key = key
+        else:
+            file_name = None
+
+        if file_name is not None:
+            # Comprimimos la licencia            
+            # import StringIO
+            # import zipfile
+            # zipcontent = StringIO.StringIO()
+            # myzipfile = zipfile.ZipFile(zipcontent, mode='w')
+            # myzipfile.writestr(file_name, key_content)
+            # myzipfile.close()
+            # file_name = "license_key.zip"
+            # key_content = zipcontent.getvalue()
+            # zipcontent.close()
+
+            attachment = kayako.attach_to_ticket(
+                tick_dict['ticketid'],
+                tick_dict['ticketpostid'],
+                file_name,
+                key_content)
+            logging.error(tick_dict)
+            logging.error(attachment)
+            logging.error("Acaba el envio de adjunto")
+
+        # Mark license as active
+        order_license.status = 'Active'
+        order_license.save()
+
+        resp_text += " License: " + license_key
+        logging.error("Acaba todo")
+
+        return resp_text
 
 
-class ClientMigration(models.Model):
-    name = models.CharField(max_length=255)
-    client = models.ForeignKey(Client, db_column='client_id')
-    contact_email = models.EmailField()
-    date_start = models.DateTimeField()
-    date_end = models.DateTimeField(blank=True, null=True)
+class ClientOptions(object):
+
+    def __init__(self):
+        self.fijos = [(0, "Todos")]
+
+    def generar(self):
+        tmp = [(c.id, c.fullname()) for c in Client.objects.all()]
+        return tmp + self.fijos
+
+    def __iter__(self):
+        for choice in self.generar():
+            yield choice
+
+
+class CouponBase(models.Model):
+    TYPE = (("fixed", "fixed"),
+            ("percent", "percent"))
+    CYCLE = (("once", "Once"),
+            ("recurring", "Recurring"))
+    CLIENTS = (("all", "All customers"),
+                ("new", "Only new customers"),
+                ("existing", "Only existing customers"))
+
+    code = models.CharField(max_length=32, verbose_name="coupon code")
+    value = models.DecimalField(max_digits=10, decimal_places=2,  verbose_name="discount", default=100)
+    type_field = models.CharField(max_length=32,
+                                  db_column="type", choices=TYPE, verbose_name="discount type", default='percent')
+    cycle = models.CharField(max_length=32, choices=CYCLE, verbose_name="discount cycle", default='once')
+    products = models.TextField(blank=True)
+    upgrades = models.TextField(blank=True)
+    addons = models.TextField(blank=True)
+    domains = models.TextField(blank=True, null=True)
+    cycles = models.CharField(max_length=255, default='all')
+    num_usage = models.IntegerField(max_length=5, default=0)
+    max_usage = models.IntegerField(max_length=5, default=1)
+    expires = models.DateField()
+    clients = models.CharField(max_length=255, choices=CLIENTS, verbose_name="Applicable by")
     notes = models.TextField()
 
     class Meta:
-        db_table = 'gigas_client_migrations'
-        permissions = (("export_clientmigration", "Can export"),)
+        permissions = (("export_couponbase", "Can export"),)
+        abstract = True
 
-    def __unicode__(self):
-        return unicode(self.name)
+    def max_usage_fh(self):
+        return 'Unlimited' if self.max_usage == 0 else self.max_usage
+    max_usage_fh.short_description = 'Max usage'
+    max_usage_fh.admin_order_field = 'max_usage'
 
-    def client_link(self):
-        change_url = urlresolvers.reverse('admin:clients_client_change', args=(self.client.id,))
-        return '<a href="%s">%s</a>' % (change_url, self.client.id)
-    client_link.allow_tags = True
-
-    def client_email_link(self):
-        change_url = urlresolvers.reverse('admin:clients_client_change', args=(self.client.id,))
-        return '<a href="%s">%s</a>' % (change_url, self.client.email)
-    client_email_link.allow_tags = True
+    max_usage_custom = property(max_usage_fh)
 
 
-class ClientPrivileges(models.Model):
-    client = models.OneToOneField(Client, db_column='client_id', primary_key=True)
-    privileges = models.TextField()
+class Coupon(CouponBase):
+    client_id = models.IntegerField(blank=True, null=True, default=0)
+    client_id.help_text="Poner 0 para todos o el id de <a href='%s' target='_blank'>cliente</a>" % '../../../clients/client/'  #CLIENT_CHOICES)
 
     class Meta:
-        db_table = 'hb_client_privileges'
-        permissions = (("export_clientprivileges", "Can export"),)
+        permissions = (("export_coupon", "Can export"),)
+        db_table = 'hb_coupons'
 
     def __unicode__(self):
-        return unicode(self.privileges)
+        return unicode(self.code)
 
+    def is_used(self):
+        return self.num_usage > 0
+    is_used.admin_order_field = 'num_usage'
+
+    def get_user(self):
+        try:
+            user = self.couponlog_set.get().client
+            #user = CouponLog.objects.get(coupon__id=self.id).client
+        except CouponLog.DoesNotExist:
+            user = ""
+
+        return user
+
+    def used_by_link(self):
+        try:
+            log = self.couponlog_set.get()
+            #log = CouponLog.objects.get(coupon__id=self.id)
+            client_url = urlresolvers.reverse('admin:clients_client_change', args=(log.client.id,))
+            return '<a href="%s">%s</a>' % (client_url, log.client.clientdetail)
+        except:
+            if self.is_used():
+                return 'Unknown'
+            else:
+                return "--"
+    used_by_link.allow_tags = True
+
+    def products_list(self):
+        product_ids = self.products.split('|')
+        products = []
+        for product_id in product_ids:
+            try:
+                name = Product.objects.get(pk=product_id).name
+            except:
+                name = 'All'
+            products.append(name)
+        return ', '.join(products)
+
+    def save(self, *args, **kwargs):
+        if not self.clients == 'existing':
+            self.client_id.id = 0
+
+        super(Coupon, self).save(*args, **kwargs)
+
+    def creation_date(self):
+        try:
+            return self.couponextradetail_set.get().creation_date.date()
+
+        except self.DoesNotExist:
+            return ''
+
+        except AttributeError:
+            return 'Error'
+
+        except:
+            return ''
+
+    def assigned_to(self):
+        try:
+            return self.couponextradetail_set.get().assigned_to
+
+        except self.DoesNotExist:
+            return ''
+
+        except AttributeError:
+            return 'Error'
+
+        except:
+            return ''
+
+    def notes(self):
+        try:
+            return self.couponextradetail_set.get().notes
+
+        except self.DoesNotExist:
+            return ''
+
+        except AttributeError:
+            return 'Error'
+
+        except:
+            return ''
+
+    def client(self):
+        try:
+            return self.couponextradetail_set.get().client
+
+        except self.DoesNotExist:
+            return ''
+
+        except AttributeError:
+            return 'Error'
+
+        except:
+            return ''
+
+    def aplicable_by(self):
+        if self.clients != 'existing' or self.client_id == 0:
+            return self.get_clients_display()
+        else:
+
+            c = Client.objects.get(pk=self.client_id_id)
+            change_url = urlresolvers.reverse('admin:clients_client_change', args=(c.id,))
+            return '<a href="%s">%s</a>' % (change_url, c.email)
+    aplicable_by.allow_tags = True
+
+    def resend_coupon(self):
+        if self.clients != 'existing' or self.client_id == 0 or self.num_usage>=self.max_usage or(self.expires is not None and self.expires <= datetime.date.today()):
+            return ""
+        resend_url = urlresolvers.reverse(
+            'resend-coupon',
+            kwargs={'coupon_id': self.id}
+        )
+        return '<a href="%s">%s</a>' % (resend_url, "Reenviar")
+        # return "Reenviar"
+    resend_coupon.allow_tags = True
+
+    def delete(self, *args, **kwargs):
+        filterwarnings('ignore', category=Database.Warning)
+        super(Coupon, self).delete(*args, **kwargs)
+
+    def extra_type_field(self):
+        try:
+            return self.couponextradetail_set.get().type_field.promo or '--'
+        except (CouponExtraDetail.DoesNotExist, AttributeError):
+            return '--'
+    extra_type_field.short_description = 'Coupon type'
+    extra_type_field.admin_order_field = 'couponextradetail__type_field__promo'
+
+    def referrer_link(self):
+        try:
+            referrer = self.couponextradetail_set.get().referrer
+
+        except self.couponextradetail_set.model.DoesNotExist:
+            pass
+
+        else:
+            if referrer is not None:
+                change_url = urlresolvers.reverse('admin:clients_client_change',
+                                            args=(referrer.id,))
+                return '<a href="%s">%s</a>' % (change_url, referrer)
+
+        return '--'
+
+    def all_promos(self):
+        return CouponPromo.objects.iterator()
+
+    referrer_link.allow_tags = True
+    referrer_link.short_description = 'referrer'
+    referrer_link.admin_order_field = 'couponextradetail__referrer__id'
+
+#se usa couponFK para tener un cupon con cliente-foreignkey. como marcamos con un 0 para indicar que es para cualquier cliente, esto hace petar Django. por eso usamos cuponFK
+class CouponFK(CouponBase):
+    class Meta:
+        permissions = (("export_couponfk", "Can export"),)
+        db_table = 'hb_coupons'
+
+    client_id = models.ForeignKey(Client, db_column='client_id', unique=False, blank=True)
+
+
+class CouponPromo(models.Model):
+    class Meta:
+        permissions = (("export_couponpromo", "Can export"),)
+        db_table = 'gigas_promotions'
+
+    promo = models.CharField(max_length=25, primary_key=True)
+    description = models.CharField(max_length=50, null=True, blank=False)
+    coupon_prefix = models.CharField(max_length=5, null=True, blank=False)
+    days_until_action = models.IntegerField(null=True, blank=True, help_text="Optional")
+    date_start = models.DateTimeField(null=True, blank=False)
+    date_end = models.DateTimeField(null=True, blank=True)
+    notes = models.CharField(max_length=250, null=True, blank=False)
+
+    def needs_apply(self):
+        return days_until_action is not None
+
+    def validate_unique(self, *args, **kwargs):
+        super(CouponPromo, self).validate_unique(*args, **kwargs)
+
+        if self.date_start and self.date_end and self.date_start >= self.date_end:
+            raise ValidationError({'date_start' : (u'Date start later than Date end',)})
+
+    def __unicode__(self):
+        return unicode(self.promo)
+
+
+class CouponExtraDetail(models.Model):
+    coupon = models.ForeignKey(Coupon, db_column='coupon_id', unique=True)
+    creation_date = models.DateField(default=datetime.date.today)
+    client = models.CharField(max_length=255, blank=True)
+    assigned_to = models.ForeignKey(User)
+    notes = models.TextField(blank=True)
+    type_field = models.ForeignKey(CouponPromo, db_column='type', null=True, default='trial',help_text='El prefijo de promoción se añadirá al inicio del código de cupón.', verbose_name="Promo")
+    referrer = models.ForeignKey(Client, null=True, blank=True, db_column='referer_id')  #TODO: cambiar el nombre en tabla y eliminar db_column
+
+    class Meta:
+        permissions = (("export_couponextradetail", "Can export"),)
+        db_table = 'gigas_coupons_extradetails'
+
+    def __unicode__(self):
+        return unicode(self.coupon)
+
+
+class CouponLog(models.Model):
+    coupon = models.ForeignKey(Coupon)
+    client = models.ForeignKey(Client, verbose_name='used by')
+    order = models.ForeignKey(Order)
+    date = models.DateField(verbose_name='used at')
+    discount = models.DecimalField(max_digits=10, decimal_places=2)
+
+    class Meta:
+        permissions = (("export_couponlog", "Can export"),)
+        db_table = 'hb_coupons_log'
+
+    def __unicode__(self):
+        return unicode(self.coupon.code)
+
+    def used_by_link(self):
+        try:
+            change_url = urlresolvers.reverse('admin:clients_client_change',
+                                    args=(self.client.id,))
+            return '<a href="%s">%s</a>' % (change_url, self.client)
+        except:
+            return "--"
+    used_by_link.allow_tags = True
+    used_by_link.admin_order_field = 'client'
+    used_by_link.short_description = 'Used by'
+
+    def coupon_link(self):
+        try:
+            change_url = urlresolvers.reverse('admin:orders_coupon_change',
+                                    args=(self.coupon.id,))
+            return '<a href="%s">%s</a>' % (change_url, self.coupon.code)
+        except:
+            return "--"
+    coupon_link.allow_tags = True
+    coupon_link.admin_order_field = 'coupon'
+    coupon_link.short_description = 'Coupon'
+
+    def order_link(self):
+        try:
+            change_url = urlresolvers.reverse('admin:orders_order_change',
+                                    args=(self.order.id,))
+            return '<a href="%s">%s</a>' % (change_url, self.order.id)
+        except:
+            return '--'
+    order_link.allow_tags = True
+    order_link.admin_order_field = 'order'
+    order_link.short_description = 'order id'
+
+
+class CouponUsage(CouponLog):
+    class Meta:
+        permissions = (("export_couponusage", "Can export"),)
+        proxy = True
+
+    def referrer_link(self):
+        try:
+            referrer = self.coupon.couponextradetail_set.get().referrer
+            change_url = urlresolvers.reverse('admin:clients_client_change',
+                                        args=(referrer.id,))
+            return '<a href="%s">%s</a>' % (change_url, referrer)
+
+        except CouponExtraDetail.DoesNotExist:
+            return "--"
+        except AttributeError:
+            return "--"
+        except Coupon.DoesNotExist:
+            return "--"
+        except Order.DoesNotExist:
+            return "--"
+        except:
+            return "--"
+
+    referrer_link.allow_tags = True
+    referrer_link.admin_order_field = 'coupon__couponextradetail__referrer__id'
+    referrer_link.short_description = 'Referrer'
+
+    def promo_name(self):
+        result = ''
+        try:
+            result = self.coupon.couponextradetail_set.get().type_field.promo
+        except:
+            result = '--'
+        return result
+    promo_name.short_description = 'Promo name'
+
+    def status(self):
+
+        try:
+            if self.order.invoice_id.status <> 'Paid':
+                return "<span style='color:#ff0000;'>Invoice unpaid</span"
+        except (Invoice.DoesNotExist, Order.DoesNotExist):
+            pass
+
+        try:
+            applied = self.couponreferralbenefit
+        except CouponReferralBenefit.DoesNotExist:
+            applied = False
+
+        days = None
+        try:
+            days = self.coupon.couponextradetail_set.get().type_field.days_until_action
+        except (AttributeError, CouponExtraDetail.DoesNotExist, CouponPromo.DoesNotExist, Coupon.DoesNotExist):
+            pass
+
+        referrer = None
+        try:
+            referrer = self.coupon.couponextradetail_set.get().referrer
+        except CouponExtraDetail.DoesNotExist:
+            pass
+
+        color = "#000000"
+        text = "--"
+        if days is None:
+            text = '--'
+        elif applied:
+            color = '#00AA00'
+            text = 'Applied on %s' % applied.date
+        elif self.date + datetime.timedelta(days=days) > datetime.date.today():
+            color = '#999999'
+            text = '%s days left' % (self.date + datetime.timedelta(days=days) - datetime.date.today()).days
+        else:
+            change_url = urlresolvers.reverse('admin:orders_couponusage_change', args=(self.id,))
+            return '<button style="color:#CC0000; font-size:0.8em;" onclick="window.location.href=\'%s\'; return false;"> APLICAR </a>' % (change_url)
+
+        return '<strong style="color: %s">%s</strong>' % (color, text)
+    status.allow_tags = True
+
+
+class CouponReferralBenefit(models.Model):
+    usage = models.OneToOneField(CouponLog, null=False, blank=False, db_column='coupon_log_id')
+    discount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    date = models.DateField(default=datetime.date.today)
+
+    class Meta:
+        permissions = (("export_couponreferralbenefit", "Can export"),)
+        db_table = 'gigas_coupon_referral_benefits'
+
+    def __unicode__(self):
+        return unicode(self.usage)
+
+
+class WinLicense(models.Model):
+    license_type = models.CharField(max_length=255)
+    key = models.CharField(max_length=255)
+    count = models.IntegerField(max_length=11)
+
+    class Meta:
+        permissions = (("export_winlicense", "Can export"),)
+        db_table = 'django_win_licenses'
+
+    def __unicode__(self):
+        return unicode(self.id)
+
+
+class PromoContact(models.Model):
+    name = models.CharField(max_length=128)
+    company = models.CharField(max_length=128)
+    email = models.CharField(max_length=255, blank=True, null=True)
+    phone = models.CharField(max_length=24, blank=True, null=True)
+    promotype = models.CharField(max_length=24)
+    contacted = models.BooleanField()
+    referer_name = models.CharField(max_length=128)
+    referer_company = models.CharField(max_length=128, blank=True, null=True)
+    coupon_id = models.ForeignKey(Coupon, db_column='coupon_id')
+
+
+    class Meta:
+        permissions = (("export_promocontact", "Can export"),)
+        db_table = 'gigas_mgmcontact'
+
+    def __unicode__(self):
+        return unicode("%s/%s" % (self.name, self.company))
+
+    def mail_repr(self):
+        return unicode("Nombre: %s, Empresa: %s, Telefono: %s, Email: %s, Ref. Nombre: %s, Ref. Empresa: %s, Cupon: %s" % (self.name, self.company, self.phone, self.email, self.referer_name, self.referer_company, self.coupon_id.id))
+
+
+class OrderScenario(models.Model):
+    id = models.AutoField(primary_key=True)
+    name = models.CharField(max_length=127L)
+    
+    class Meta:
+        permissions = (("export_orderscenario", "Can export"),)
+        db_table = 'hb_order_scenarios'
+        managed = False
+
+    def __unicode__(self):
+        return self.name
+
+    
+class OrderScenarioStep(models.Model):
+    id = models.AutoField(primary_key=True)
+    scenario = models.ForeignKey(OrderScenario, db_column='scenario_id')
+    name = models.CharField(max_length=127L)
+    auto = models.IntegerField()
+    enabled = models.IntegerField()
+    class Meta:
+        permissions = (("export_orderscenariostep", "Can export"),)
+        db_table = 'hb_order_scenarios_steps'
+        managed = False
+
+    def __unicode__(self):
+        return unicode(self.scenario.id) + u'-' + unicode(self.name)
+
+    
+class OrderStep(models.Model):
+    STATUS = (('Completed','Completed'), ('Pending','Pending'))
+    order =  models.ForeignKey(Order, db_column='order_id', primary_key=True)
+    step =   models.ForeignKey(OrderScenarioStep, db_column='step_id', primary_key=True)
+    status = models.CharField(max_length=9L, choices=STATUS)
+    date_changed = models.DateTimeField(auto_now=True)
+    output = models.TextField()
+
+    class Meta:
+        permissions = (("export_orderstep", "Can export"),)
+        db_table = 'hb_order_steps'
+        managed = False
+        unique_together = ('order','step',)
+
+    def __unicode__(self):
+        return unicode(self.step.name) + u'-' + self.status
 

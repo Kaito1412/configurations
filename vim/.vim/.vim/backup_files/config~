@@ -4,11 +4,8 @@
 	bare = false
 	logallrefupdates = true
 [remote "origin"]
-	url = https://github.com/Kaito1412/configurations.git
+	url = https://github.com/Kaito1412/pickUpKnow.git
 	fetch = +refs/heads/*:refs/remotes/origin/*
 [branch "master"]
 	remote = origin
 	merge = refs/heads/master
-[remote "gitlab"]
-	url = https://gitlab.com/Kaito1412/configurations.git
-	fetch = +refs/heads/*:refs/remotes/gitlab/*

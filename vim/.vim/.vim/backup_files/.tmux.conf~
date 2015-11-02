@@ -14,8 +14,9 @@ set -g status-keys vi
 set -g history-limit 10000
 
 setw -g mode-keys vi
-setw -g mode-mouse on
 setw -g monitor-activity on
+
+bind -n WheelUpPane if-shell -F -t = "#{mouse_any_flag}" "send-keys -M" "if -Ft= '#{pane_in_mode}' 'send-keys -M' 'copy-mode -e'"
 
 bind-key v split-window -h
 bind-key s split-window -v
@@ -54,8 +55,6 @@ bind -n S-Right next-window
 
 # No delay for escape key press
 set -sg escape-time 0
-
-bind -n WheelUpPane copy-mode
 
 # Reload tmux config
 bind r source-file ~/.tmux.conf

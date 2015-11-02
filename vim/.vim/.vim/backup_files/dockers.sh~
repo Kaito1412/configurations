@@ -1,0 +1,24 @@
+#!/bin/bash
+docker start db_mysql
+sleep 2
+docker start db_redis
+sleep 2
+docker start rabbitmq   
+sleep 2
+docker start hal        
+sleep 2
+docker start front      
+sleep 2
+docker start api        
+sleep 2
+docker start hostbill   
+sleep 2
+docker start mapp       
+sleep 2
+docker start router     
+sleep 2
+docker start executor   
+sleep 2
+docker start kudeiro    
+sleep 2
+docker start hapi       

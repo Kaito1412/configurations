@@ -274,23 +274,28 @@
                 <div class="tstitle">
                   <h3>{$lang.privacity}</h3>
                 </div>
-                {$details|@var_dump}
                 <p class="domain-info">{$lang.privacity_info}</p>
                 
                 <div class="mlp2 wrp-switch">
                   <label class="renew-label">{$lang.privacity}</label>
-                  {if $details.idprotection == 0}
-                    <strong><span class="auto-on">{$lang.On}</span></strong>
-                    <a href="?/clientarea/domains/{$details.id}/{$details.name}/&widget=idprotection&widgetdo=updateIDProtection&idprotection=1&security_token={$security_token}"
-                      id="privacy_pub_button"><strong><span class="auto-off">{$lang.Off}</span></strong></a>
-                  {else}
-                    <a href="?/clientarea/domains/{$details.id}/{$details.name}/&widget=idprotection&widgetdo=updateIDProtection&idprotection=0&security_token={$security_token}"
-                      id="privacy_pri_button"><strong><span class="auto-off">{$lang.On}</span></strong></a>
-                    <strong><span class="auto-on">{$lang.Off}</span></strong>
+                      <div class="domain-switch {if !$details.offerprotection} domain-switch-disabled{/if}">
+                      {if $details.idprotection == 0}
+                          <strong><span class="auto-on">{$lang.On}</span></strong>
+                          <a href="?/clientarea/domains/{$details.id}/{$details.name}/&widget=idprotection&widgetdo=updateIDProtection&idprotection=1&security_token={$security_token}"
+                            {if !$details.offerprotection} onclick="return false" {/if}
+                            id="privacy_pub_button">
+                          <strong><span class="auto-off">{$lang.Off}</span></strong></a>
+                      {else}
+                          <a href="?/clientarea/domains/{$details.id}/{$details.name}/&widget=idprotection&widgetdo=updateIDProtection&idprotection=0&security_token={$security_token}"
+                            {if !$details.offerprotection} onclick="return false" {/if}
+                            id="privacy_pri_button">
+                          <strong><span class="auto-off">{$lang.On}</span></strong></a>
+                          <strong><span class="auto-on">{$lang.Off}</span></strong>
+                      {/if}
+                      </div>
                   {/if}
                   <input type="hidden" id="privacyfield" name="nameservers[idprotection]" value="{$details.idprotection}" />
                 </div>
-                {/if}
                 {* /if *}
                 {* if (!preg_match("/\.es$/i", $details.name)) *}
 
@@ -301,6 +306,7 @@
 
                   <div class="mlp2 wrp-switch">
                     <label class="renew-label">{$lang.domain_lock_mini}</label>
+                    <div class="domain-switch">
                     {if $details.reglock==1}
                       <strong><span class="auto-on">{$lang.On}</span></strong>
                       <a href="?/clientarea/domains/{$details.id}/{$details.name}/&widget=reglock&widgetdo=updateRegistrarLock&updateRegistrarLock=0&security_token={$security_token}"
@@ -310,6 +316,7 @@
                          id="lockbutton"><strong><span class="auto-off">{$lang.On}</span></strong></a>
                       <strong><span class="auto-on">{$lang.Off}</span></strong>
                     {/if}
+                    </div>
                   </div>
               {/if}
             </div>
@@ -387,6 +394,7 @@
 
 	      <div class="mlp2 wrp-switch {if $details.autorenew == 0 and ($is_invoice_gen_period or !$payment_allow_autorenew)}wrp-switch-disabled{/if}">
               <label class="renew-label">{$lang.autorenewval}</label>
+              <div class="domain-switch">
              {if $details.autorenew==1}
                   <strong><span class="auto-on">{$lang.On}</span></strong>
                   <a
@@ -412,7 +420,7 @@
                   </a>
                   <strong><span class="auto-on">{$lang.Off}</span></strong>
                 {/if}
-
+                </div>
 	      </div>
             <script src="{$template_dir}js/fancybox/jquery.fancybox-1.3.4.pack.js"></script>
             <link rel="stylesheet" href="{$template_dir}js/fancybox/jquery.fancybox-1.3.4.css" type="text/css" media="screen" />

@@ -1,0 +1,45 @@
+import os
+import sys
+path = os.path.dirname(__file__).replace("cron", "")
+if path not in sys.path:
+    sys.path.append(path)
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "settings")
+import ConfigParser
+
+
+def get_config(config_path):
+    config = ConfigParser.ConfigParser()
+    if os.path.exists(config_path):
+        config.read(config_path)
+        return config
+
+    else:
+        return None
+
+
+def rreplace(s, old, new, occurrence):
+    li = s.rsplit(old, occurrence)
+    return new.join(li)
+
+
+def get_config_as_dict(filename, section=None):
+    config_file = ('{d}/{f}'
+                   .format(d=os.path.dirname(os.path.realpath(filename)),
+                           f=rreplace(os.path.basename(filename),
+                                      '.py',
+                                      '.cnf',
+                                      1)))
+    try:
+        with open(config_file):
+            pass
+    except IOError:
+        print("Cannot find or read configuration file. Trying to read {path}"
+              .format(path=config_file))
+        sys.exit()
+
+    config = ConfigParser.ConfigParser()
+    config.read(config_file)
+
+    return (config._sections
+            if section is None
+            else config._sections.get(section))

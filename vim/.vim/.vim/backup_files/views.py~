@@ -1,168 +1,661 @@
 # -*- coding: utf-8 -*-
-from django.contrib.auth.decorators import login_required
-from django.http import HttpResponseRedirect
-from django.contrib import messages
-from orders.models import Order, Coupon
-from accounts.models import Account
-from invoices.models import Invoice
-from clients.models import Client
-from email_template.models import EmailTemplate
-from email_template.utils import get_email_template
-from django.core.mail import send_mail
-from smtplib import SMTPException
-from kayako.models import Kayako
-from django.utils.encoding import smart_str
-from settings import API_BILLING_HOST, API_BILLING_USER, API_BILLING_PASS
+import os
+import re
+import time
+import hashlib
 import datetime
-import requests
 import logging
 
+from django.shortcuts import render_to_response, render
+from django.template.loader import render_to_string
+from django.template.base import TemplateDoesNotExist
+from django.http import HttpResponsePermanentRedirect, HttpResponse
+from django.http import Http404, HttpResponseServerError
+from django.core.cache import cache
+from django.core.mail.message import EmailMessage
+from django.core.mail import send_mail
+from django.utils.encoding import smart_str
+from django.core.context_processors import csrf
 
-@login_required
-def change_status(request, status):
+from www.settings import *
+from products.utils import get_product_prices, get_addon_prices
+from i18n.utils import (get_language_name, get_currency_info, get_country_info,
+                        get_translations, get_country_language)
+from www.models import Coupon, PromoContact, Translation
+from kayako.models import Kayako
+from www.libs.recaptcha import captcha
+from .utils import get_variants, get_cache_path
+from lxml.etree import fromstring
 
-    orders = request.POST.getlist('_selected_action')
 
-    if len(orders) > 1:
-        messages.add_message(request, messages.ERROR, 'No se puede cancelar más de un order a la vez')
-        return HttpResponseRedirect('/admin/orders/order')
+def render_template(request, detected_language=None, template_dir=None, template_file=None, context_vars=None):
+    context_vars = context_vars or {}
 
-    if not status in ['cancelled']:
-        messages.add_message(request, messages.ERROR, 'El nuevo estado del order no es válido')
-        return HttpResponseRedirect('/admin/orders/order')
+    # Averiguamos en que país estamos
+    country = None
+    geo_country = get_geoip_country(request)
+    cookie_country = 'country' in request.COOKIES and request.COOKIES['country'] or None
+    full_path = get_full_path(request)
 
-    status = status.capitalize()
+    # if you're googlebot i'm going to give you the spanish site with a header
+    # pointing to the english one ( link rel="alternate" hreflang="x" href="alternateURL"> )
+    # notice: a safer aproach would be cheking the client IP against a whitelist of IPs
+    # but we're using spoofable useragent here
+    # a current example of one of googlebot useragents is
+    # "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
+    user_agent = request.META.get('HTTP_USER_AGENT', None)
+    if user_agent is not None and u'googlebot' in user_agent.lower() and detected_language is None:
+        country = DEFAULT_COUNTRY
+    else:
+        # First time here?
+        if cookie_country is None and detected_language is None and geo_country not in ROOT_COUNTRIES:
+            return redirect_to(geo_country, full_path)
 
-    if status == 'Cancelled':
-        for order_id in orders:
-            order = Order.objects.get(pk=order_id)
-            order_status = order.status
+        # untouched detected_language var cannot be /es !!! => /
+        if detected_language == DEFAULT_LANGUAGE:
+            return redirect_to(geo_country, full_path)
 
+        if detected_language is None:
+            detected_language = DEFAULT_LANGUAGE
+
+        if detected_language not in LANGUAGES:
+            raise Http404
+
+        if geo_country in get_countries_by_language(detected_language) or \
+                (detected_language == 'es' and geo_country in LATAM):
+            country = geo_country
+        elif detected_language in DEFAULT_COUNTRIES:
+            country = DEFAULT_COUNTRIES[detected_language]
+        else:
+            country = geo_country
+
+    # Averiguamos idioma y moneda del país
+    country_info = get_country_info(country)
+    language = country_info['language']
+    # Permitimos que se cambie la moneda por GET
+    currency = request.REQUEST.get('cur', country_info['currency'])
+
+    # Sobrescribimos si viene por GET o por COOKIE siempre que no estemos cambiando de país
+    if cookie_country is not None and cookie_country == country:
+        if 'language' in request.COOKIES:
+            language = request.COOKIES['language']
+
+        if 'cur' in request.REQUEST and request.REQUEST.get('cur') in CURRENCIES:
+            currency = request.REQUEST.get('cur')
+        elif 'currency' in request.COOKIES:
+            currency = request.COOKIES['currency']
+
+    context_vars = context_vars or {}
+
+    if template_file in FORMS_SETTINGS:
+        context_vars['is_form'] = True
+        context_vars['recaptcha_public_key'] = RECAPTCHA_PUBLIC_KEY
+
+    http_response = get_http_response(request, country, language, currency,
+                                 template_dir, template_file, context_vars)
+
+
+    http_response.set_cookie('country', country)
+    http_response.set_cookie('language', language)
+    http_response.set_cookie('currency', currency)
+    http_response.set_cookie('csrftoken', unicode(csrf(request)['csrf_token']))
+    if 'sent' in context_vars:
+        http_response.set_cookie('sent', context_vars['sent'])
+
+    if INVALIDATE_BROWSERS_CACHE:
+        http_response['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        http_response['Pragma'] = 'no-cache'
+        http_response['Expires'] = '0'
+
+    # guardar cookie de tradedoubler
+    if request.GET.get('tduid', None):
+       # si viene de tradedoubler, guardamos el tradedoubler tracker en sesion y en cookie
+
+        max_age = 45 * 24 * 60 * 60  # 45 days
+        expires = datetime.datetime.strftime(
+            datetime.datetime.utcnow() + datetime.timedelta(seconds=max_age),
+            "%a, %d-%b-%Y %H:%M:%S GMT"
+        )
+
+        http_response.set_cookie(
+            key="TRADEDOUBLER",
+            value=request.GET.get('tduid'),
+            max_age=max_age,
+            expires=expires,
+            domain=settings.SESSION_COOKIE_DOMAIN,
+            secure=settings.SESSION_COOKIE_SECURE or None
+        )
+
+        request.session['TRADEDOUBLER'] = request.GET.get('tduid')
+
+    return http_response
+
+
+def get_http_response(request, country, language, currency, template_dir, template_file, context_vars=None):
+
+    page_contents = None
+
+    # Intentamos sacar la página de cache y sino está pedimos los contenidos
+    if CACHING is True:
+        # Averiguamos la clave de cacheo
+        cache_key = get_cache_key(get_cache_path(request, CACHE_PARAMETERS),
+                                  country,
+                                  language,
+                                  currency)
+        page_contents = cache.get(cache_key)
+
+    no_cache = False
+    # cancelar el cacheo si hay que enviar errores de user
+    if context_vars is not None:
+        if any(k in context_vars for k in ('sucess_message', 'error_message', 'is_form', 'recaptcha_public_key')):
+            no_cache = True
+
+    # Si no tenemos la página en cache o no está cacheando => la generamos ...
+    if page_contents is None or request.method != "GET" or no_cache:
+        page_contents = get_page_contents(request, template_file, template_dir,
+                country, language, currency, context_vars)
+
+        # ... y la cachemos si procede
+        if CACHING is True and not no_cache:
+            cache.set(cache_key, page_contents, CACHE_TIMEOUT)
+
+    return page_contents
+
+
+def _get_abs_path(language, template_path):
+    if language != DEFAULT_LANGUAGE and language:
+        return os.path.normpath("/{0}{1}".format(language, template_path))
+    else:
+        return os.path.normpath("{0}".format(template_path))
+
+
+
+def get_page_contents(request, template_file, template_dir, country, language, currency, extra_context_vars=None):
+    # internacionalizacion de urls
+    if template_file:
+        translations = Translation.objects.filter(
+            value=os.path.normpath("{0}{1}".format(
+                "{0}/".format(template_dir) if template_dir else "",
+                template_file)),
+            tag__is_url=True
+        )
+        for translation in translations:
+            if translation.language.iso == language:
+                template_dir, template_file = os.path.split(
+                    translation.tag.tag)
+                break
+        else:
+            if translations:
+                # estas accediendo a una url inglesa
+                # en la version espanola o viceversa
+                raise Http404()
+    else:
+        translations = None
+
+    # averiguamos el link de este recurso en resto de idiomas
+    alternate_lang_links = []
+
+    if translations:
+        excluded_langs = get_variants()
+        excluded_langs.add(language)
+
+        alter_translations = Translation.objects.filter(
+            tag__id=translations[0].tag.id,
+            tag__is_url=True,
+        ).exclude(
+            language__iso__in=excluded_langs
+        )
+
+        for alter_translation in alter_translations:
+            alternate_lang_links.append({
+                "lang": alter_translation.language.iso,
+                "url":  _get_abs_path(alter_translation.language.iso,
+                                      alter_translation.value)
+            })
+    else:
+        other_langs = [l for l in LANGUAGES if l != language]
+        full_path = get_full_path(request)
+        for other_lang in other_langs:
+            alternate_lang_links.append({
+                "lang": other_lang,
+                "url": _get_abs_path(other_lang,
+                                     full_path)
+            })
+
+    if extra_context_vars is None:
+        extra_context_vars = {}
+    extra_context_vars['alternate_lang_links'] = alternate_lang_links
+
+    if template_file == '' or template_file is None:
+        template_file = DEFAULT_INDEX
+
+    if template_dir is not None:
+        template_file = os.path.join(template_dir, template_file)
+
+    link_prefix = get_link_prefix(country)
+
+    # Leemos moneda
+    currency_info = get_currency_info(currency)
+
+    # Leemos las traducciones
+    tlanguage = get_country_language(country)
+    translations = get_translations(tlanguage)
+    langname = get_language_name(tlanguage)
+
+    if translations == {}:
+        translations = get_translations(DEFAULT_LANGUAGE)
+        langname = get_language_name(DEFAULT_LANGUAGE)
+
+    # Leemos precios
+    prices = get_product_prices(country, currency_info['code'])
+    prices_addons = get_addon_prices(country, currency_info['code'])
+
+    real_country = country  # ÑAPA derivada de la ñapa de abajo
+    if country == 'US' or country == 'GB' or country == 'UK':  # ÑAPA
+        country = 'EN'
+
+    context_vars = {
+        'country': country.lower(),
+        'real_country': real_country.lower(),
+        'currency': currency_info,
+        'langcode': language,
+        'langname': langname,
+        'lang': translations,
+        'prices': prices,
+        'prices_addons': prices_addons,
+        'link_prefix': link_prefix,
+        'kayakolangid': KAYAKO_LANG_ID[language],
+        'kayakofaqid': KAYAKO_FAQ_ID[language],
+        'request': request,
+    }
+
+    if extra_context_vars is not None:
+        if 'is_form' in extra_context_vars:
+            context_vars.update(csrf(request))
+
+        for (key, value) in extra_context_vars.iteritems():
+            context_vars[key] = value
+            if key.endswith('_message'):
+                context_vars[key] = translations.get(value, "-%s-" % value)
+
+    try:
+        # Añadimos la moneda a todos los links del panel
+        page_string = render_to_string('%s/%s' % (TEMPLATE_PATH, template_file), context_vars)
+
+        regex = re.compile(r'(/panel/\?(\&{0,1}[\w\-]+\=[\w\-]+)*)', re.M)
+        page_string = regex.sub(r'\1&curr=%s' % currency_info['hid'], page_string)
+
+        page_contents = HttpResponse(page_string)
+
+    except TemplateDoesNotExist:
+        raise Http404
+
+    except:
+        return HttpResponseServerError()
+
+    return page_contents
+
+
+def get_cache_key(request_uri, country, language, currency):
+    return hashlib.md5("%s_%s_%s_%s" % (request_uri, country, language, currency)).hexdigest()
+
+
+def get_server_vars(meta):
+    _server = meta
+
+    if meta.get('GEOIP_COUNTRY_CODE') is None:
+        _server['GEOIP_COUNTRY_CODE'] = None
+
+    return _server
+
+
+def get_geoip_country(request):
+    country = get_server_vars(request.META)['GEOIP_COUNTRY_CODE']
+    if country is None:  # y si no tenemos nada, pues la de por defecto
+        country = DEFAULT_COUNTRY
+
+    if 'country' in request.REQUEST:
+        country = request.REQUEST.get('country')
+
+    return country
+
+
+def get_full_path(request):
+    full_path = request.get_full_path()
+    country_found = re.match('/[\w]{2}(/|$)', full_path)
+
+    if country_found is not None:
+        full_path = '/' + full_path[len(country_found.group(0)):]
+
+    return full_path
+
+
+def get_link_prefix(country):
+    country_info = get_country_info(country)
+
+    if country_info['language'] == DEFAULT_LANGUAGE or country in get_countries_by_language(DEFAULT_LANGUAGE):
+        link_prefix = ''
+    else:
+        link_prefix = '/%s' % country_info['language']
+
+    return link_prefix
+
+
+def redirect_to(country, path='/'):
+    response = HttpResponsePermanentRedirect("%s%s" % (get_link_prefix(country), path))
+    response.set_cookie('country', country)
+    return response
+
+
+def get_countries_by_language(language):
+    return [c for c, info in COUNTRY_INFO.iteritems() if info['language'] == language]
+
+
+def error403(request, reason=None):
+    return render_to_response('%s/error/403.html' % TEMPLATE_PATH)
+
+
+def error404(request):
+    return render_to_response('%s/error/404.html' % TEMPLATE_PATH)
+
+
+def error500(request):
+    return render_to_response('%s/error/500.html' % TEMPLATE_PATH)
+
+
+def call_phone(request):
+    if 'phone' in request.POST:
+        contact_info = smart_str(request.POST.get('phone'))
+        phone = re.sub(r'[^0-9\+\(\)]', '', contact_info.split(' / ')[0])
+        email = re.sub(r'[^0-9a-zA-Z\-\_\.\+@]', '', contact_info.split(' / ')[1])
+        send_mail('Solicitud de contacto para solución a medida en Cloud Datacenter',
+                'Número de teléfono: %s\nEmail: %s' % (phone, email), "root@gigas.com", ["soporte@gigas.com"])
+
+        return HttpResponse('done')
+
+    return HttpResponse('error')
+
+
+def _get_sane_field(data, field, validation=None):
+    """
+    filter post data, if something's wrong, return None
+    """
+    value = data.get(field, None)
+
+    if validation is not None and value is not None and (re.match(validation, value) is None):
+        value = None
+
+    return value
+
+
+def contact_promo(request, detected_language=None):
+
+    # shorcut
+    render_back = lambda variables: render_template(request, detected_language=detected_language, template_dir='promo/MGM/', template_file='', context_vars=variables)
+    
+    if request.method != "POST":
+        try:
+            resp = render_back({'is_form': True})
+            return resp
+        except Exception, e:
+            print "excepcion! %s" % type(e)
+            raise e
+        return resp
+    else:
+        rewrite_vars = dict((key, request.POST.get(key, None)) for key in ('refererCompany', 'refererName', 'coupon', 'company', 'name', 'email', 'prefij', 'telefono'))
+        rewrite_vars['is_form'] = True
+        num_errors = int(request.COOKIES.get('num_errors') or 0)
+        # last_error = request.COOKIES.get('last_error')
+
+        if num_errors > 4:
+            rewrite_vars["error_message"] = "too_many_errors"
+            return render_back(rewrite_vars)
+
+        proxy = "http://{0}:{1}@{2}".format(USER_PROXY, PASS_PROXY, HTTP_PROXY)
+        response = captcha.submit(request.POST.get('recaptcha_challenge_field'),
+                request.POST.get('recaptcha_response_field'),
+                RECAPTCHA_PRIVATE_KEY,
+                request.META['REMOTE_ADDR'],
+                proxy={'http': proxy})
+        # see if the user correctly entered CAPTCHA information
+        # and handle it accordingly.
+        if not response.is_valid:
+            time.sleep(2)  # pierde algo de tiempo
+            rewrite_vars["error_message"] = "wrong_captcha"
+            resp = render_back(rewrite_vars)
+            resp.set_cookie("num_errors", num_errors + 1)
+            return resp
+
+        if 'coupon' not in request.POST:
+            rewrite_vars["error_message"] = "no_coupon"
+            resp = render_back(rewrite_vars)
+            resp.set_cookie("num_errors", num_errors + 1)
+            return resp
+
+        coupon_code = _get_sane_field(request.POST, 'coupon', r'[\w\-\_]')
+        try:
+            coupon = Coupon.objects.filter(code=coupon_code).get()
+        except Coupon.DoesNotExist:
+            # return HttpResponse("Invalid coupon")
+            rewrite_vars["error_message"] = "wrong_coupon"
+            resp = render_back(rewrite_vars)
+            resp.set_cookie("num_errors", num_errors + 1)
+            return resp
+
+        if PromoContact.objects.filter(coupon_id=coupon.id).count() > 50:
+            rewrite_vars["error_message"] = "max_contacts"
+            resp = render_back(rewrite_vars)
+            resp.set_cookie("num_errors", num_errors + 1)
+            return resp
+
+        # validar info
+
+        # create contact
+        refererCompany = _get_sane_field(request.POST, 'refererCompany', r'[\w]')
+        refererName = _get_sane_field(request.POST, 'refererName', r'[\w]')
+        if not refererName:
+            # return HttpResponse("Please, specify your name")
+            rewrite_vars["error_message"] = "no_ref_name"
+            resp = render_back(rewrite_vars)
+            resp.set_cookie("num_errors", num_errors + 1)
+            return resp
+
+        company = _get_sane_field(request.POST, 'company', r'[\w\ \-\+]')
+
+        name = _get_sane_field(request.POST, 'name', r'[\w]')
+        if not name:
+            # return HttpResponse("Please, specify who we will talk to")
+            rewrite_vars["error_message"] = "no_name"
+            resp = render_back(rewrite_vars)
+            resp.set_cookie("num_errors", num_errors + 1)
+            return resp
+
+        email = _get_sane_field(request.POST, 'email', r'[\w\.\-@]')
+
+        tlfprefix = _get_sane_field(request.POST, 'tlfprefix', r'[\d\+]')
+        tlfno = _get_sane_field(request.POST, 'tlfno', r'[\d\-\ ]')
+        # either both or none
+        if (tlfno and not tlfprefix) or (not tlfno and tlfprefix):
+            # return HttpResponse("Please specify contact's full phone number")
+            rewrite_vars["error_message"] = "no_full_phone"
+            resp = render_back(rewrite_vars)
+            resp.set_cookie("num_errors", num_errors + 1)
+            return resp
+
+        fulltlf = None
+        if tlfno:
+            fulltlf = "%s%s" % (tlfprefix, tlfno)
+
+        if not email and not fulltlf:
+            # return HttpResponse("Please specify contact's phone or email in order to be able to contact him/her")
+            rewrite_vars["error_message"] = "no_phone_mail"
+            resp = render_back(rewrite_vars)
+            resp.set_cookie("num_errors", num_errors + 1)
+            return resp
+
+        contact1 = PromoContact(name=name,
+                                company=company,
+                                email=email,
+                                phone=fulltlf,
+                                promotype='mgm',
+                                contacted=False,
+                                referer_name=refererName,
+                                referer_company=refererCompany,
+                                coupon_id=coupon)
+        contact1.save()
+
+        mensaje = "%s" % contact1.mail_repr()
+        try:
+            send_mail('Solicitud de contacto MGM', mensaje, "root@gigas.com", ["nelia.moreno@gigas.com", "guillermo.arana@gigas.com"])
+        except:
+            print "Solicitud de contacto MGM: %s" % mensaje
+        # return HttpResponse("We will contact %s soon" % who)
+        rewrite_vars["success_message"] = "contact_him"
+        for del_key in ('company', 'name', 'email', 'prefij', 'telefono'):
             try:
-                account_status = order.account_set.get().status
-                invoice_status = order.invoice_id.status
-            except Account.DoesNotExist:
-                account_status = ''
-            except Invoice.DoesNotExist:
-                invoice_status = ''
+                del rewrite_vars[del_key]
+            except KeyError:
+                continue
+
+        resp = render_back(rewrite_vars)
+        resp.set_cookie('num_errors', 0)
+        return resp
 
 
-            if order_status == 'Pending' and account_status == 'Pending' and invoice_status == 'Unpaid':
-                order.status = 'Cancelled'
-                order.save()
-
-                account = Account.objects.get(pk=order.account_set.get().id)
-                account.status = 'Cancelled'
-                account.save()
-
-                invoice = Invoice.objects.get(pk=order.invoice_id.id)
-                invoice.status = 'Cancelled'
-                invoice.save()
-
-                messages.add_message(request, messages.INFO, 'Order id #%s se ha cancelado correctamente' % order_id)
-
-            else:
-                messages.add_message(request, messages.ERROR, 'Order id #%s no puede ser cancelado porque no cumple los requisitos' % order_id)
-
-    return HttpResponseRedirect('/admin/orders/order')
-
-@login_required
-def resend_coupon(request, coupon_id):
-    template_by_product_list = {"Plesk ( 10 dominios )":"license:plesk10coupon","default":"license:plesk10coupon"}
-    try:
-        c = Coupon.objects.get(pk=coupon_id)
-    except Coupon.DoesNotExist:
-        messages.add_message(request, messages.ERROR, "Cupon %s no encontrado" % coupon_id)
-        return HttpResponseRedirect('/admin/orders/coupon')
-
-    ok = True
-    cond_error = ""
-    #Comprobar que cumple condiciones para reenvio
-    if c.clients != 'existing' or c.client_id == 0:
-        ok = False
-        cond_error = "No hay un unico destinatario. %s %s" % (c.clients, c.client_id)
-    if c.num_usage >= c.max_usage:
-        ok = False
-        cond_error = "Demasiados usos. "
-    if c.expires is not None and c.expires <= datetime.date.today():
-        ok = False
-        cond_error = "Cupon expirado"
-    if not ok:
-        messages.add_message(request, messages.ERROR, "Cupon no cumple los requisitos para poder ser enviado: %s" % cond_error)
-        return HttpResponseRedirect('/admin/orders/coupon')
-
-    # recuperamos el cliente
-    try:
-        cli = Client.objects.get(pk=c.client_id)
-    except Client.DoesNotExist:
-        messages.add_message(request, messages.ERROR, "Cliente %s no encontrado" % c.client_id)
-        return HttpResponseRedirect('/admin/orders/coupon')
-    client_email = cli.email
-    client_name = cli.clientdetail.firstname
-
-    # recuperamos el template a enviar
-    email_tpl_name = template_by_product_list[getattr(template_by_product_list, c.products_list(), "default")]
-
-    try:
-        emtpls = get_email_template(email_tpl_name, cli)
-    except EmailTemplate.DoesNotExist:
-        messages.add_message(request, messages.ERROR, "Template %s no encontrado" % email_tpl_name)
-        return HttpResponseRedirect('/admin/orders/coupon')
-
-    emtpl = emtpls[0]
-   #try:
-   #    send_mail(emtpl.subject, emtpl.message % dict(firstname=client_name,couponcode=c.code), "gigas@gigas.com", [client_email])
-   #except SMTPException, e:
-   #    messages.add_message("Error al enviar el correo a %s: %s" % (client_email, e))
-    kayako = Kayako.objects.all()[0]
-    ticket = kayako.new_ticket(subject=smart_str(emtpl.subject),
-                               fullname="Gigas Support",
-                               email=client_email,
-                               contents=smart_str(emtpl.message % {"firstname":client_name,"couponcode":c.code}),
-                               departmentid="32",
-                               ticketstatusid="24",
-                               ticketpriorityid="2",
-                               tickettypeid="4",
-    )
-    messages.add_message(request, messages.INFO, "Correo enviado a %s" % client_email)
-    #TODO: meter en el coupon log el reenvio
-    return HttpResponseRedirect('/admin/orders/coupon')
+def maintenance(request, detected_language):
+    response = render(request, '%s/maintenance.html' % TEMPLATE_PATH, status=503)
+    response['Retry-After'] = RETRY_AFTER_SECONDS
+    return response
 
 
-@login_required
-def activate(request, order_id):
-    # order = Order.objects.get(pk=order_id)
-    try:
-        response = requests.get('{0}/token'.format(API_BILLING_HOST),
-                                auth=(API_BILLING_USER, API_BILLING_PASS))
-    except requests.exceptions.RequestException:
-        logging.exception('API Billing does not response')
-        messages.add_message(request, messages.ERROR,
-                             'API Billing does not response')
-        return HttpResponseRedirect(
-            '/admin/orders/order/{0}/'.format(order_id))
-    if response.status_code != 200:
-        logging.error('Impossible to get token')
-        messages.add_message(request, messages.ERROR,
-                             'Impossible to get token')
-        return HttpResponseRedirect(
-            '/admin/orders/order/{0}/'.format(order_id))
-    token = response.json()['token']
-    try:
-        response = requests.post(
-            '{0}/order/{1}/activate'.format(API_BILLING_HOST, order_id),
-            headers={'Authorization': token})
-        logging.error(response.text)
-    except requests.exceptions.RequestException:
-        messages.add_message(request, messages.ERROR,
-                             'Error trying to activate order')
-        return HttpResponseRedirect(
-            '/admin/orders/order/{0}/'.format(order_id))
+def send_form(request, detected_language=None, template_dir=None,
+              template_file=None, context_vars=None):
+    # do we have form settings?
+    if template_file not in FORMS_SETTINGS:
+        logging.error('template file {0} not found in FORMS_SETTINGS. '
+                      'Please check settings file: www/settings.py'
+                      .format(template_file))
+        return error403(request)
 
-    logging.debug(response.text)
-    messages.add_message(
+    # validate template file
+    if 'HTTP_REFERER' in request.META:
+        referer = request.META['HTTP_REFERER']
+        if referer.find(template_file) == -1:
+            return error403(request)
+    else:
+        return error403(request)
+
+    # render utility ;)
+    render_back = lambda variables: render_template(
         request,
-        messages.SUCCESS if response.status_code == 200 else messages.ERROR,
-        'Activated' if response.status_code == 200 else 'Failed Activate')
+        detected_language=detected_language,
+        template_dir=template_dir,
+        template_file=template_file,
+        context_vars=variables)
 
-    return HttpResponseRedirect('/admin/orders/order/{0}/'.format(order_id))
+    # check if user is uploading a file
+    uploaded_files = []
+    for key in request.FILES.keys():
+        f = request.FILES.get(key)
+        f.content_file = f.read()
+        uploaded_files.append(f)
+
+    # prepare some vars
+    form_settings = FORMS_SETTINGS[template_file]
+    message = "{0}\n\n".format(form_settings['subject'])
+    rewrite_vars = dict()
+    rewrite_vars['is_form'] = True
+
+    num_errors = int(request.COOKIES.get('num_errors') or 0)
+    max_errors = int(form_settings.get('max_errors',
+                                       FORMS_SETTINGS['max_errors']))
+
+    # check if max errors overtaken
+    if num_errors > max_errors:
+        rewrite_vars["error_message"] = "too_many_errors"
+        return render_back(rewrite_vars)
+
+    # compose email/ticket message and context_vars
+    for key in request.POST:
+        if key == 'csrfmiddlewaretoken' or key.startswith('recaptcha'):
+            continue
+        rewrite_vars['formfield_{0}'.format(key)] = request.POST[key]
+        message += "{0}: {1}\n".format(key, smart_str(request.POST[key]))
+
+    # see if the user correctly entered CAPTCHA information
+    # and handle it accordingly.
+    try:
+        proxy = "http://{0}:{1}@{2}".format(USER_PROXY, PASS_PROXY, HTTP_PROXY)
+        response = captcha.submit(
+            request.POST.get('recaptcha_challenge_field'),
+            request.POST.get('recaptcha_response_field'),
+            RECAPTCHA_PRIVATE_KEY,
+            request.META['REMOTE_ADDR'],
+            proxy={'http': proxy})
+        logging.error(response)
+    except Exception:
+        logging.exception('probablemente las claves de '
+                          'recaptcha no son validas')
+        return error403(request)
+
+    if not response.is_valid:
+        time.sleep(2)  # pierde algo de tiempo
+        rewrite_vars["error_message"] = "wrong_captcha"
+        rewrite_vars["wrong_captcha"] = True
+        resp = render_back(rewrite_vars)
+        resp.set_cookie("num_errors", num_errors + 1)
+        return resp
+
+    # send the email/ticket
+    sent = False
+    if 'email' in form_settings:
+        try:
+            msg = EmailMessage(
+                subject=form_settings['subject'], 
+                body=message,
+                from_email=form_settings['email'].get(
+                          'from',
+                          'root@gigas.com'),
+                to=[form_settings['email']['to']])
+            for ufile in uploaded_files:
+                msg.attach(ufile.name, ufile.content_file)
+            msg.send()
+            sent = True
+        except Exception:
+            logging.exception("No se ha podido enviar el mail")
+
+    if 'kayako' in form_settings:
+        client = form_settings['kayako']['client']
+        ticket_status = form_settings['kayako']['ticket_status']
+        department_id = form_settings['kayako']['department_id']
+        ticket_type = form_settings['kayako']['ticket_type']
+        ticket_priority = form_settings['kayako']['ticket_priority']
+
+        try:
+            kayako = Kayako.objects.all()[0]
+            kresponse = kayako.send_ticket_front(form_settings['subject'], message, client,
+                                     ticket_status, department_id, ticket_type,
+                                     ticket_priority)
+
+            if uploaded_files:
+                xml = fromstring(kresponse)
+                ticketid = xml.iter('ticket').next().get('id')
+                postid = xml.iter('post').next().find('id').text
+                for ufile in uploaded_files:
+                    resp = kayako.attach_to_ticket(
+                        ticketid=str(ticketid),
+                        ticketpostid=str(postid),
+                        filename=ufile.name, 
+                        contents=ufile.content_file,
+                    )
+            sent = True
+        except Exception, e:
+            logging.exception("No se ha podido enviar el ticket {e}".format(e=e))
+
+    if not sent:
+        rewrite_vars["error_message"] = "form_not_sent"
+
+    # return to form
+    rewrite_vars['sent'] = sent
+    resp = render_back(rewrite_vars)
+    return resp

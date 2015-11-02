@@ -1,5 +1,5 @@
 let g:netrw_dirhistmax  =10
-let g:netrw_dirhist_cnt =7
+let g:netrw_dirhist_cnt =9
 let g:netrw_dirhist_1='/home/kaito/Workspace/gigas-hostbill/includes/modules/Hosting'
 let g:netrw_dirhist_2='/home/kaito/Documentos/Hostbill4/includes/core/pdo'
 let g:netrw_dirhist_3='/home/kaito/Workspace/personal/configurations'
@@ -7,3 +7,5 @@ let g:netrw_dirhist_4='/home/kaito/.zsh'
 let g:netrw_dirhist_5='/home/kaito/Workspace/gigas_front/www/libs/recaptcha'
 let g:netrw_dirhist_6='/home/kaito/Workspace/gigas_hapi/onapp'
 let g:netrw_dirhist_7='/home/kaito/Workspace/gigas-hostbill/includes/modules/Hosting'
+let g:netrw_dirhist_8='/home/kaito/Workspace/configurations/.git'
+let g:netrw_dirhist_9='/home/kaito/Descargas/recordsWUI/public/less'

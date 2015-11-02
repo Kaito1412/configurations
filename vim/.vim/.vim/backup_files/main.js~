@@ -1,20 +1,18 @@
+/*global require*/
 'use strict';
 
-/**
- * @ngdoc function
- * @name 04TodoApp.controller:MainCtrl
- * @description
- * # MainCtrl
- * Controller of the 04TodoApp
- */
-angular.module('04TodoApp')
-  .controller('MainCtrl', function ($scope) {
-    $scope.tareas = ['item 1', 'item 2', 'item 3', 'item 4'];
-    $scope.addTarea = function() {
-        $scope.tareas.push($scope.tarea);
-        $scope.tarea = '';
-    };
-    $scope.delTarea = function (index) {
-        $scope.tareas.splice(index, 1);
-    };
-  });
+require.config({
+    shim: {
+    },
+    paths: {
+        jquery: '../bower_components/jquery/dist/jquery',
+        backbone: '../bower_components/backbone/backbone',
+        underscore: '../bower_components/lodash/dist/lodash'
+    }
+});
+
+require([
+    'backbone'
+], function (Backbone) {
+    Backbone.history.start();
+});

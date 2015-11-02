@@ -488,7 +488,6 @@ class gigashosting extends HostingModule implements Observer
             $api_user_id = $api_user['id'];
         }
 
-        hbm_log_error("username: ".$username);
         #
         # RESOURCES
         #

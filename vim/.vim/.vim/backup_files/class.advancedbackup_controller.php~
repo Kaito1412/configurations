@@ -18,7 +18,12 @@ class AdvancedBackup extends ProductController
 
     public function service()
     {
+      try {
         $vms = $this->user_api->get('/advanced_backups')->json();
+      } catch (GigasApiException $e) {
+        Engine::singleton()->addError("error_api");
+        hbm_redirect('clientarea/services/advanced-backup/');
+      }
         if (count($vms) == 0) {
             throw new Exception('No backup vms found');
         }
@@ -138,8 +143,6 @@ class AdvancedBackup extends ProductController
                 } else {
 
                     $params = $this->request->getPost();
-        var_dump($params);
-        die("4");
                     $backup_config = $this->backup->set_config($params);
 
                     if (!empty($backup_config)) {
@@ -226,8 +229,6 @@ class AdvancedBackup extends ProductController
             }
         }
 
-        var_dump($size);
-        die("1");
         hbm_redirect('&cmd=clientarea&action=services&service=' . $this->details['service'] .'&vpsdo=vmdetails&vpsid=' . $this->details['vpsid']);
     }
 }

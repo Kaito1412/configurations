@@ -8,22 +8,26 @@ function error_handler {
   fi  
 }
 
+PATH=$PATH:$HOME/.scripts
+export EDITOR=/usr/bin/vim
+
 trap 'error_handler' ERR
 
+# Options about history
 export HISTFILE="$HOME/.history"
 export SAVEHIST=$HISTSIZE
-
-export EDITOR=/usr/bin/vim
+setopt incappendhistory
 
 # Resaltado de sintaxis. Hace Falta tener instalado
 source /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
 
 [[ $- != *i* ]] && return
-if [ -f /usr/bin/archey ]; then archey; fi
+if [ -f /usr/bin/archey3 ]; then archey3; fi
 alias reload="~/.zshrc"
 alias ls='ls --color=auto'
 alias pacman='pacman --color=always'
 alias grep='grep --color'
+alias gnome-terminal="gnome-terminal --window --maximize"
 
 autoload -U compinit promptinit
 autoload -U colors && colors

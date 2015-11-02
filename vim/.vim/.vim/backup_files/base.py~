@@ -141,6 +141,7 @@ class DBManager(object):
     # overwrite to value to be used as id
     as_id = 'id'
     modfun = None
+    default_order_field = as_id
 
     def __init__(self, database, object_class, console, cloud_id,
                  as_admin=False, modification_function=None,
@@ -162,6 +163,15 @@ class DBManager(object):
                           database.__name__, object_class.__name__)
             raise TypeError("Database %s does not contain a %s object",
                             database.__name__, object_class.__name__)
+
+    def set_default_order_field(self, default_order_field):
+        try:
+            getattr(self.obj_class, default_order_field)
+        except AttributeError:
+            raise ManagerException(
+                "Default order field '{0}' is not valid".format(
+                    default_order_field))
+        self.default_order_field = default_order_field
 
     def _get_session(self):
         if (self._session is None):
@@ -302,7 +312,6 @@ class DBManager(object):
             return True
 
     def _gen_clause(self, filter_field, value):
-        print filter_field
         if filter_field.startswith('~'):
             if filter_field.endswith('?'):
                 if not isinstance(value, string_types):
@@ -314,14 +323,7 @@ class DBManager(object):
                             .like(value))
             else:
                 return (getattr(self.obj_class, filter_field[1:]) != value)
-        elif filter_field.endswith('<='):
-            return (getattr(self.obj_class, filter_field[:-2]) <= value)
-        elif filter_field.endswith('<'):
-            return (getattr(self.obj_class, filter_field[:-1]) < value)
-        elif filter_field.endswith('>='):
-            return (getattr(self.obj_class, filter_field[:-2]) >= value)
-        elif filter_field.endswith('>'):
-            return (getattr(self.obj_class, filter_field[:-1]) > value)
+
         else:
             if filter_field.endswith('?'):
                 if not isinstance(value, string_types):
@@ -375,8 +377,7 @@ class DBManager(object):
         for fltr in filters:
             if (filters[fltr] is not None
                     and not isinstance(filters[fltr], (string_types,
-                                                       Number, bool,
-                                                       datetime))):
+                                                       Number, bool))):
                 if fltr.startswith(('~', '&')):  # not in, in all
                     noand_fltr = fltr
                     if fltr.startswith('&'):
@@ -444,6 +445,7 @@ class DBManager(object):
         - [ 'label', 'id' ]
         '''
         query = self.session.query(self.obj_class)
+        print(query)
 
         if filters is not None and hasattr(filters, 'keys'):
             query = self._apply_filters(query, filters)
@@ -454,8 +456,10 @@ class DBManager(object):
         if query is None:
             return [].__iter__()
 
-        alq_objs = _get_order_objects(order_by, self.obj_class,
-                                      default_order_field=self.as_id)
+        alq_objs = _get_order_objects(
+            order_by,
+            self.obj_class,
+            default_order_field=self.default_order_field)
         query = query.order_by(*alq_objs)
 
         if group_by:
@@ -617,9 +621,10 @@ class DBManager(object):
             raise ManagerException()
             return None
 
-        alq_objs = _get_order_objects(order_by,
-                                      self.obj_class,
-                                      default_order_field=self.as_id)
+        alq_objs = _get_order_objects(
+            order_by,
+            self.obj_class,
+            default_order_field=self.default_order_field)
         query = query.order_by(*alq_objs)
         query = self._paginate(query, None, offset)
 

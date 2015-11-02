@@ -1,0 +1,204 @@
+# -*- coding: utf-8 -*-
+from datetime import datetime
+from comfy import get_config
+import logging
+from managers.db import api_db
+from managers.exceptions import ManagerException
+from managers.base import DBManager
+
+
+config = get_config('managers')
+logger = logging.getLogger(config._project_name)
+
+
+class TransactionManager(DBManager):
+    def __init__(self, console=None, api_user_id=None, as_admin=False, modification_function=None):
+        self.api_user_id = api_user_id
+        super(TransactionManager, self).__init__(
+                api_db, api_db.ExecutorTransaction, console, None, as_admin, modification_function)
+
+    def _cloud_filter(self, query):
+        if not self.admin:
+            return query.filter_by(api_user_id=self.api_user_id)
+        else:
+            return query
+
+    def cloud_filter(self, query):
+        query = super(TransactionManager, self).cloud_filter(query)
+        return query.filter_by(console_id=self.console)
+
+    def add_transaction(self, action, token, task_list, priority=30, start_after=None):
+        # añade la transaccion con sus tareas
+        tr_id = self.create_object(dict(
+            action=action,
+            token=token,
+            priority=priority,
+            status='Working_on_it',
+            console_id=self.console,
+            api_user_id=self.api_user_id,
+            start_after=start_after
+        ))
+
+        task_mng = TaskManager(console=self.console, api_user_id=self.api_user_id, as_admin=self.admin)
+        tasks_added = []
+
+        for task_info in task_list:
+            parent_id = tasks_added[-1] if tasks_added else None  # get last
+            parameters = task_info.get('parameters', None)
+            allowed_cancel = task_info.get('allowed_cancel', None)
+            task_priority = task_info.get('priority', priority)
+
+            try:
+                new_task_id = task_mng.create_object(dict(
+                    console_id=self.console,
+                    transaction_id=tr_id,
+                    parent_id=parent_id,
+                    action=task_info['action'],
+                    target_type=task_info['target_type'],
+                    target_id=task_info['target_id'],
+                    params=parameters,
+                    allowed_cancel=allowed_cancel,
+                    status='Pending',
+                    priority=task_priority,
+                    api_user_id=self.api_user_id
+                ))
+
+            except Exception:  # something went wrong, rollback
+                for t_id in tasks_added:
+                    task_mng.delete(task_mng.get_object(t_id))
+                self.delete_transaction(tr_id, force=True)
+
+                raise ManagerException()
+
+            tasks_added.append(new_task_id)
+
+        # finally set transaction pending
+        return self.update_fields(self.get_object(tr_id), {"status": "Pending"})
+
+    def update_transaction(self, transaction_id, fields_to_update, force=False):
+        try:
+            trans_filters = {"id": transaction_id}
+            if not force:
+                trans_filters["~status"] = "Working_on_it"
+            return self.update_fields(self.get_object(trans_filters, with_lock="update"), fields_to_update)
+        except TypeError:
+            raise ManagerException('Transaction locked or not found')
+
+    def cancel_transaction(self, transaction_id):
+        tr = self.update_transaction(transaction_id, {"status": "Cancelled"})
+        task_mng = TaskManager(console=self.console, api_user_id=self.api_user_id, as_admin=self.admin)
+        for task in task_mng.get_list({"transaction_id": transaction_id, "status": "Pending"}):
+            task_mng.cancel_task(task.id)
+        return tr
+
+    def fail_transaction(self, transaction_id):
+        tr = self.update_transaction(transaction_id, {"status": "Failed"})
+        task_mng = TaskManager(console=self.console, api_user_id=self.api_user_id, as_admin=self.admin)
+        for task in task_mng.get_list({"transaction_id": transaction_id, "status": "Pending"}):
+            task_mng.cancel_task(task.id)
+        return tr
+
+    def complete_transaction(self, transaction_id):
+        tr = self.update_transaction(transaction_id, {"status": "Completed"})
+        task_mng = TaskManager(console=self.console, api_user_id=self.api_user_id, as_admin=self.admin)
+        tasks_pending = task_mng.get_count({"transaction_id": transaction_id, "status": "Pending"})
+        if tasks_pending:
+            logger.error("Transaction #{0} completed successfully but "
+                         "some tasks are still pending"
+                         .format(transaction_id))
+        return tr
+
+    def get_pending_transaction(self, within_actions=None, without_action=None):
+        '''
+        find next pending transaction and set it to running
+        '''
+        filters = {"status": "Pending"}
+
+        if within_actions:
+            filters["action"] = within_actions
+
+        if without_action:
+            filters["~action"] = without_action
+
+        trans = self.get_first_object(filters, order_by=[('priority', 'desc'), ('id', 'asc')], with_lock='update')
+
+        if not trans:
+            return None
+
+        return self.update_fields(trans, {"status": "Running"})
+
+    def delete_transaction(self, transaction_id, force=False):
+        t_params = {"id": transaction_id}
+        if not force:
+            t_params.update({"~status": ["Running", "Working_on_it"]})
+
+        tr = self.get_object(t_params, with_lock="update")
+
+        if tr is not None:
+            tr = self.update_fields(tr, {"status": "Working_on_it"})
+            task_mng = TaskManager(self.console, self.api_user_id, self.admin)
+            for task in task_mng.get_list({"transaction_id": transaction_id}):
+                task_mng.delete(task)
+
+            return self.delete(tr)
+
+        self._session = None
+        return False
+
+    def unlock(self, transaction):
+        self.update_fields(transaction,
+                           {"updated_at": datetime.utcnow()})
+
+
+class TaskManager(DBManager):
+    def __init__(self, console=None, api_user_id=None, as_admin=False,
+                 modification_function=None):
+
+        self.api_user_id = api_user_id
+        super(TaskManager, self).__init__(api_db,
+                                          api_db.ExecutorTask,
+                                          console,
+                                          None,
+                                          as_admin,
+                                          modification_function)
+
+    def _cloud_filter(self, query):
+        return query.filter_by(api_user_id=self.api_user_id)
+
+    def cloud_filter(self, query):
+        query = super(TaskManager, self).cloud_filter(query)
+        return query.filter_by(console_id=self.console)
+
+    def get_pending_task(self, transaction_id):
+        task = self.get_first_object(
+                    {
+                        "transaction_id": transaction_id,
+                        "status": "Pending",
+                    },
+                    order_by=[('priority', 'desc'), ('id', 'asc')],
+                    with_lock='update'
+                )
+        return (None if task is None
+                     else self.update_fields(task, {"status": "Running"}))
+
+    def get_pending_tasks(self, transaction_id):
+        yield self.get_pending_task(transaction_id)
+
+    def cancel_task(self, task_id, log_output=None):
+        return self.update_fields(self.get_object(task_id),
+                                  {"status": "Cancelled",
+                                   "log_output": log_output})
+
+    def fail_task(self, task_id, log_output=None):
+        return self.update_fields(self.get_object(task_id),
+                                  {"status": "Failed",
+                                   "log_output": log_output})
+
+    def complete_task(self, task_id, log_output=None):
+        return self.update_fields(self.get_object(task_id),
+                                  {"status": "Completed",
+                                   "log_output": log_output})
+
+    def unlock(self, task):
+        self.update_fields(task,
+                           {"updated_at": datetime.utcnow()})

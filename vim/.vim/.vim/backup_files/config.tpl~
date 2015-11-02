@@ -1,0 +1,47 @@
+{php}
+   die();
+{/php}
+<div class="formwrap fw2 pnl">
+    <div class="dv m-dv coteBacak">
+        <form action="?cmd=clientarea&action=services&service={$service.id}&vpsdo=saveconfig&vpsid={$vpsid}" method="POST">
+            <div class="tstitle">
+                <h3>{$lang.backup_adv_config}</h3>
+            </div>
+            {if ! $backupadv_accounts}
+            <script type="text/javascript">
+                addMessage('We couldnt find any Cloud Datacenter to share backup space with. |No se han encontrado ningún Cloud Datacenter con que puedas compartir el espacio de backup. ');
+            </script>
+            {/if}
+            <div class="seclec-cloud-back">
+                <p>{$lang.backup_adv_config_info}</p>
+                <select name="dc_account_id">
+                    {foreach from=$backupadv_accounts item=acc}
+                    <option value="{$acc.id}">{$lang.cloud_dc} {$acc.friendly_name} ({$acc.date_created})</option>
+                    {/foreach}
+                </select>
+            </div>
+            <div class="selec-vlan-back">
+                <p>{$lang.backup_adv_config_info2}</p>
+                <select name="vlan_account_id">
+                    {foreach from=$backupadv_vlans item=acc name=foo}
+                    {if $acc.status == 'Active'}
+                    <option value="{$acc.id}">{$acc.friendly_name} {$smarty.foreach.foo.iteration}{if $acc.vlan_range} ({$acc.vlan_range}){/if}</option>
+                    {/if}
+                    {/foreach}
+                </select>
+            </div>
+            <div class="selec-pass-back">
+                <div class="contePassBack">
+                    <p>{$lang.backup_adv_config_admin_pass}</p>
+                    <input type="password" name="password" />
+                </div>
+                <p>Repite la contraseña</p>
+                <input type="password" name="repeat_password" />
+                <br/>
+            </div>
+            {if $backupadv_accounts}
+            <input type="submit" name="submit" value="{$lang.submit}" />
+            {/if}
+        </form>
+    </div>
+</div>

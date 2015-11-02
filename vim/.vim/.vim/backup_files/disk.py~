@@ -9,7 +9,7 @@ class Disk:
         for disk in psutil.disk_partitions():
             self.disks["partitions"].append(self.one(disk))
 
-        self.disks["percent"] = self.disks["used"] / self.disks["total"] * 100
+        self.disks["percent"] = (self.disks["used"] / self.disks["total"]) * 100
         return self.disks
     
     @classmethod

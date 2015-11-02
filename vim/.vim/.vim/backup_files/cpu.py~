@@ -4,25 +4,14 @@ import platform
 
 class CPU:
     
-    @classmethod
-    def vendor(self):
-        return cpuinfo.get_cpu_info()['vendor_id'] 
-
-    @classmethod
-    def model(self):
-        return cpuinfo.get_cpu_info()['brand']
-
-    @classmethod
-    def number(self):
-        return psutil.cpu_count(logical=True)
+    vendor = cpuinfo.get_cpu_info()['vendor_id'] 
+    model = cpuinfo.get_cpu_info()['brand']
+    number = psutil.cpu_count(logical=True)
+    total = cpuinfo.get_cpu_info()['hz_advertised']
 
     @classmethod
     def used(self):
         return psutil.cpu_percent(percpu=True)
-
-    @classmethod
-    def total(self):
-        return cpuinfo.get_cpu_info()['hz_advertised']
 
     @classmethod
     def temperature(self):

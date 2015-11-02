@@ -1,5 +1,6 @@
 {
     "DATABASES": {
+
         "consoles":[
             {"host":"10.0.40.10",
              "db_name":"onapp",
@@ -12,7 +13,12 @@
              "user":"toni.valverde",
              "pass":"my$$",
              "pool_recycle":30
-            }],
+            },
+            {"host":"127.0.0.1",
+             "db_name":"ovm",
+             "user":"root",
+             "pass":"PASSWORD",
+             "pool_recycle":30}],
         "hal":[{"host":"10.0.40.10",
                 "db_name":"gigas_hal",
                 "user":"toni.valverde",
@@ -23,21 +29,29 @@
                 "user":"toni.valverde",
                 "pass":"my$$",
                 "pool_recycle":30
-               }],
+               },
+               {"host":"127.0.0.1",
+                "db_name":"gigas_hal_ovm",
+                "user":"root",
+                "pass":"PASSWORD",
+                "pool_recycle":30}],
         "api":[{"host":"127.0.0.1",
                 "db_name":"gigas_api",
                 "user":"root",
-                "port": 13306,
-                "pass":"root",
+                "pass":"PASSWORD",
                 "pool_recycle":30
                },
                {"host":"127.0.0.1",
                 "db_name":"gigas_api",
                 "user":"root",
-                "port": 13306,
-                "pass":"root",
+                "pass":"PASSWORD",
                 "pool_recycle":30
-               }]
+               },
+               {"host":"127.0.0.1",
+                "db_name":"gigas_api",
+                "user":"root",
+                "pass":"PASSWORD",
+                "pool_recycle":30}]
     },
 
     "VLAN_STARTING_VALUE" : 310,
