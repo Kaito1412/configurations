@@ -1,8 +1,0 @@
-FROM fedora 
-MAINTAINER kaito
-
-RUN dnf update -y
-RUN dfn install -y nodejs 
-
-
-CMD ["/bin/bash"]

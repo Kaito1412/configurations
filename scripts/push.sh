@@ -12,6 +12,5 @@ cp -r ~/.vim ~/Workspace/configurations/vim/.vim
 cp ~/.zshrc ~/Workspace/configurations/zsh/.zshrc
 cp -r ~/.zsh ~/Workspace/configurations/zsh/.zsh
 
-git add .
-git commit -m "update" 
+git commit -a -m "update" 
 git push origin gigas

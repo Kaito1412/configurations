@@ -1,4 +1,0 @@
-bottle==0.12.8
-psutil==3.2.2
-py-cpuinfo==0.1.6
-wheel==0.24.0

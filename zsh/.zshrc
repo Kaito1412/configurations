@@ -8,6 +8,7 @@ function error_handler {
   fi  
 }
 
+PATH=$PATH:$HOME/.scripts
 export EDITOR=/usr/bin/vim
 
 trap 'error_handler' ERR
@@ -21,7 +22,7 @@ setopt incappendhistory
 source /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
 
 [[ $- != *i* ]] && return
-if [ -f /usr/bin/archey ]; then archey; fi
+if [ -f /usr/bin/archey3 ]; then archey3; fi
 alias reload="~/.zshrc"
 alias ls='ls --color=auto'
 alias pacman='pacman --color=always'
