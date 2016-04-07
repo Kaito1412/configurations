@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+
+
+VIRTUALENV="$HOME/.virtualenvs/pyutils"
+
+source "$VIRTUALENV/bin/activate"
+mycli "$@"
+deactivate

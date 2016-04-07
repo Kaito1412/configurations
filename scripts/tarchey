@@ -1,0 +1,6 @@
+while [ true ]
+do
+archey3
+sleep 60
+clear
+done

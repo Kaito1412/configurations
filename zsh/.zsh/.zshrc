@@ -14,6 +14,7 @@ autoload -U colors && colors
 compinit
 promptinit
 
+source /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
 
 bindkey    "^[[3~"          delete-char
 bindkey    "^[3;5~"         delete-char

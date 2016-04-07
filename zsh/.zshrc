@@ -5,7 +5,7 @@
 function error_handler {
   if [ $? -eq 127 ]; then
      sl
-  fi  
+ fi
 }
 
 PATH=$PATH:$HOME/.scripts
@@ -14,6 +14,7 @@ export EDITOR=/usr/bin/vim
 trap 'error_handler' ERR
 
 # Options about history
+HISTSIZE=1000
 export HISTFILE="$HOME/.history"
 export SAVEHIST=$HISTSIZE
 setopt incappendhistory
@@ -27,6 +28,7 @@ alias reload="~/.zshrc"
 alias ls='ls --color=auto'
 alias pacman='pacman --color=always'
 alias grep='grep --color'
+alias vi='vim'
 
 autoload -U compinit promptinit
 autoload -U colors && colors
@@ -54,16 +56,16 @@ bindkey '^e'   end-of-line
 
 # Allow for functions in the prompt.
 setopt PROMPT_SUBST
- 
+
 # Autoload zsh functions.
 fpath=(~/.zsh/functions $fpath)
 autoload -U ~/.zsh/functions/*(:t)
- 
+
 # Enable auto-execution of functions.
 typeset -ga preexec_functions
 typeset -ga precmd_functions
 typeset -ga chpwd_functions
- 
+
 # Append git functions needed for prompt.
 preexec_functions+='preexec_update_git_vars'
 precmd_functions+='precmd_update_git_vars'

@@ -1,7 +1,11 @@
 let g:netrw_dirhistmax  =10
-let g:netrw_dirhist_cnt =5
-let g:netrw_dirhist_1='/home/kaito/Workspace/gigas-hostbill/includes/modules/Hosting'
-let g:netrw_dirhist_2='/home/kaito/Documentos/Hostbill4/includes/core/pdo'
-let g:netrw_dirhist_3='/home/kaito/Workspace/personal/configurations'
-let g:netrw_dirhist_4='/home/kaito/.zsh'
-let g:netrw_dirhist_5='/home/kaito/Workspace/gigas_front/www/libs/recaptcha'
+let g:netrw_dirhist_cnt =9
+let g:netrw_dirhist_1='/home/kaito/Workspace/gigas_devenv/db_mysql'
+let g:netrw_dirhist_2='/home/kaito/Workspace/personal/showPi/controllers'
+let g:netrw_dirhist_3='/home/kaito/Workspace/gigas_mapp/products'
+let g:netrw_dirhist_4='/home/kaito/Workspace/gigas_hostbill/includes/modules/Domain/gigasreseller/test'
+let g:netrw_dirhist_5='scp://185.37.226.159:4682//var/www/gremio/'
+let g:netrw_dirhist_6='/home/kaito/Workspace/gigas_hal/panel/templates'
+let g:netrw_dirhist_7='/home/kaito/.ssh'
+let g:netrw_dirhist_8='/home/kaito/Workspace/gigas_tests/API/Tests/confs'
+let g:netrw_dirhist_9='/home/kaito/Workspace/gigas_hostbill/includes/modules/Hosting/gigashosting/widgets/disks'
