@@ -17,6 +17,8 @@ trap 'error_handler' ERR
 HISTSIZE=1000
 export HISTFILE="$HOME/.history"
 export SAVEHIST=$HISTSIZE
+export WORKON_HOME=~/.virtualenvs
+source /usr/bin/virtualenvwrapper.sh
 setopt incappendhistory
 
 # Resaltado de sintaxis. Hace Falta tener instalado
@@ -71,4 +73,4 @@ preexec_functions+='preexec_update_git_vars'
 precmd_functions+='precmd_update_git_vars'
 chpwd_functions+='chpwd_update_git_vars'
 
-PROMPT='%{$fg_bold[cyan]%}%n %{$fg_bold[blue]%}%1~$(prompt_git_info) %{$fg_bold[cyan]%}$ %{$reset_color%}'
+PROMPT='%{$fg_bold[cyan]%}%n%{$fg_bold[magenta]%}@%{$fg_bold[blue]%}%m %{$fg_bold[magenta]%}%1~$(prompt_git_info) %{$fg_bold[cyan]%}$ %{$reset_color%}'

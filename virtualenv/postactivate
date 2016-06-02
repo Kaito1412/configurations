@@ -1,0 +1,10 @@
+#!/bin/zsh
+# This hook is sourced after every virtualenv is activated.
+#
+
+if [[ "$VIRTUAL_ENV" != "" ]]; then
+    PS1="%{$fg_bold[blue]%}ಓ %{$fg_bold[yellow]%}`basename \"$VIRTUAL_ENV\"` %{$fg_bold[cyan]%}%n%{$fg_bold[magenta]%}@%{$fg_bold[blue]%}%m %{$fg_bold[magenta]%}%1~$(prompt_git_info) %{$fg_bold[cyan]%}$ %{$reset_color%}"
+fi
+if [[ "$NODE_VIRTUAL_ENV" != "" ]]; then
+    PS1="%{$fg_bold[green]%}⎔ `basename \"$NODE_VIRTUAL_ENV\"` %{$fg_bold[cyan]%}%n%{$fg_bold[magenta]%}@%{$fg_bold[blue]%}%m %{$fg_bold[magenta]%}%1~$(prompt_git_info) %{$fg_bold[cyan]%}$ %{$reset_color%}"
+fi

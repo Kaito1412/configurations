@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 
-
-VIRTUALENV="$HOME/.virtualenvs/nodeenv"
+VIRTUALENV="$HOME/.virtualenvs/pyutils"
 
 source "$VIRTUALENV/bin/activate"
 nodeenv "$@"

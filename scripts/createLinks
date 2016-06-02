@@ -1,0 +1,15 @@
+mkdir ~/.virtualenvs >2 /dev/null
+
+rm -rf ~/.zsh
+rm -rf ~/.vim
+rm -rf ~/.vimrc
+rm -rf ~/.tmux.conf
+rm -rf ~/.gitconfig
+rm -rf ~/.virtualenvs/postactivate
+
+ln -s /home/kaito/Workspace/configurations/vim/.vimrc ~/.vimrc
+ln -s /kaito/Workspace/configurations/zsh/.zsh ~/.zsh
+ln -s /home/kaito/Workspace/configurations/vim/.vim ~/.vim
+ln -s /home/kaito/Workspace/configurations/tmux/.tmux.conf ~/.tmux.conf
+ln -s /home/kaito/Workspace/configurations/git/.gitconfig ~/.gitconfig
+ln -s /home/kaito/Workspace/configurations/virtualenv/postactivate ~/.virtualenvs/postactivate

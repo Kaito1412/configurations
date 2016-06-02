@@ -1,0 +1,32 @@
+CONFIGURATIONS="/home/kaito/Workspace/configurations"
+
+# bash
+rm $CONFIGURATIONS/bash/.bashrc
+cp ~/.bashrc $CONFIGURATIONS/bash/.bashrc
+
+# git
+rm $CONFIGURATIONS/git/.gitconfig
+cp ~/.gitconfig $CONFIGURATIONS/git/.gitconfig
+
+# scripts
+cp ~/.scripts/* $CONFIGURATIONS/scripts
+
+# vim
+rm $CONFIGURATIONS/vim/.vimrc
+rm -rf $CONFIGURATIONS/vim/.vim
+cp ~/.vimrc $CONFIGURATIONS/vim/.vimrc
+cp -r ~/.vim $CONFIGURATIONS/vim/.vim
+
+# virtualenv
+rm $CONFIGURATIONS/virtualenv/postactivate
+cp ~/.virtualenvs/postactivate $CONFIGURATIONS/virtualenv/postactivate
+
+# tmux
+rm $CONFIGURATIONS/tmux/.tmux.conf
+cp ~/.tmux.conf $CONFIGURATIONS/tmux/.tmux.conf
+
+# zsh
+rm $CONFIGURATIONS/vim/.vimrc
+rm -rf $CONFIGURATIONS/vim/.vim
+cp ~/.zshrc $CONFIGURATIONS/zsh/.zshrc
+cp -r ~/.zsh $CONFIGURATIONS/vim/.zsh

@@ -1,0 +1,6 @@
+while [ true ]
+do
+docker ps -a --format "table {{.Names}}\t{{.Status}}"
+sleep 60
+clear
+done
