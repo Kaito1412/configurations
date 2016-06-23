@@ -12,6 +12,9 @@ Plug 'pangloss/vim-javascript'
 Plug 'kannokanno/previm'
 Plug 'tpope/vim-unimpaired'
 Plug 'joukevandermaas/vim-ember-hbs'
+Plug 'Townk/vim-autoclose'
+Plug 'vim-scripts/closetag.vim'
+Plug 'edsono/vim-matchit'
 call plug#end()
 
 syntax enable

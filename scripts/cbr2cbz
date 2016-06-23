@@ -1,0 +1,16 @@
+#!/bin/bash
+# Author: Alon Ivtsan
+# License: GPL3+
+
+for FILE in *{.cbr,.CBR}
+do
+    [ -e "$FILE" ] || continue
+    echo Converting $FILE to cbz format.
+    DIR="${FILE%.*}"
+    mkdir "$DIR";
+    unar ./"$FILE" -o "$DIR";
+    zip -r "$DIR".cbz "$DIR";
+    rm -r "$DIR";
+    gvfs-trash "$FILE";
+    echo Conversion of $FILE successful!
+done
