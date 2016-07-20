@@ -37,6 +37,8 @@ autoload -U colors && colors
 compinit
 promptinit
 
+bindkey -v
+bindkey '^R' history-incremental-search-backward
 bindkey "^[[3~"  delete-char
 bindkey "^[3;5~" delete-char
 bindkey '\e[1~'  beginning-of-line
