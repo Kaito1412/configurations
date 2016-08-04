@@ -1,0 +1,9 @@
+[nodeenv]
+# Utiliza versiones precompiladas en lugar de compilar una (mucho más rápido).
+prebuilt = True
+# Instala npm en los entornos virtuales
+with_npm = True
+# No desactivar SSL al compilar node.js
+without_ssl = False
+# Desactivamos el debug al compilar node.js
+debug = False

@@ -1,20 +1,24 @@
 call plug#begin('~/.vim/plugged')
-Plug 'tpope/vim-sensible'
-Plug 'ctrlpvim/ctrlp.vim'
-Plug 'scrooloose/syntastic'
-Plug 'tpope/vim-fugitive'
 Plug 'airblade/vim-gitgutter'
 Plug 'bling/vim-airline'
-Plug 'rking/ag.vim'
-Plug 'othree/html5.vim'
-Plug 'Valloric/YouCompleteMe'
-Plug 'pangloss/vim-javascript'
-Plug 'kannokanno/previm'
-Plug 'tpope/vim-unimpaired'
-Plug 'joukevandermaas/vim-ember-hbs'
-Plug 'Townk/vim-autoclose'
-Plug 'vim-scripts/closetag.vim'
+Plug 'ctrlpvim/ctrlp.vim'
 Plug 'edsono/vim-matchit'
+Plug 'joukevandermaas/vim-ember-hbs'
+Plug 'kannokanno/previm'
+Plug 'mileszs/ack.vim'
+Plug 'othree/html5.vim'
+Plug 'pangloss/vim-javascript'
+Plug 'Raimondi/delimitMate'
+Plug 'rking/ag.vim'
+Plug 'scrooloose/syntastic'
+Plug 'tpope/vim-commentary'
+Plug 'tpope/vim-fugitive'
+Plug 'tpope/vim-sensible'
+Plug 'tpope/vim-surround'
+Plug 'tpope/vim-unimpaired'
+Plug 'Valloric/YouCompleteMe'
+Plug 'vim-airline/vim-airline-themes'
+Plug 'vim-scripts/closetag.vim'
 call plug#end()
 
 syntax enable
@@ -39,14 +43,22 @@ set statusline+=%*
 set undodir=~/.vim/undo_files//
 set pastetoggle=<F2>
 
-let g:previm_open_cmd = 'firefox'
 let g:airline_powerline_fonts = 1
+let g:previm_open_cmd = 'firefox'
 let g:syntastic_always_populate_loc_list = 1
 let g:syntastic_auto_loc_list = 1
 let g:syntastic_check_on_open = 1
 let g:syntastic_check_on_wq = 0
 
+let g:ackprg = 'ag --vimgrep --smart-case'
+cnoreabbrev ag Ack
+cnoreabbrev aG Ack
+cnoreabbrev Ag Ack
+cnoreabbrev AG Ack
+
 nmap     <Enter>       [<Space>
+nnoremap j             gj
+nnoremap k             gk
 nnoremap <end>         <nop>
 nnoremap <Home>        <nop>
 nnoremap <PageUp>      <nop>
@@ -78,7 +90,10 @@ inoremap <4-LeftMouse> <nop>
 
 augroup PrevimSettings
     autocmd!
+    filetype on
     autocmd BufNewFile,BufRead *.{md,mdwn,mkd,mkdn,mark*} set filetype=markdown
+    autocmd FileType python \
+        nnoremap <buffer> <F4> :exec '!clear; python' shellescape(@%, 1)<cr>
 augroup END
 
 filetype plugin on

@@ -10,8 +10,12 @@
     ci = commit
     ft = fetch
 [diff]
-    tool = vimdiff
+	tool = vimdiff
 [merge]
-    tool = vimdiff
+	tool = vimdiff
 [push]
     default = current
+[difftool]
+	prompt = false
+[color]
+	ui = auto
