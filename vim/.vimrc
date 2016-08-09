@@ -51,7 +51,6 @@ let g:syntastic_always_populate_loc_list = 1
 let g:syntastic_auto_loc_list = 1
 let g:syntastic_check_on_open = 1
 let g:syntastic_check_on_wq = 0
-let g:syntastic_javascript_checkers = ['jshint', 'jscs']
 
 let g:ackprg = 'ag --vimgrep --smart-case'
 cnoreabbrev ag Ack
@@ -91,11 +90,35 @@ inoremap <2-LeftMouse> <nop>
 inoremap <3-LeftMouse> <nop>
 inoremap <4-LeftMouse> <nop>
 
+function SetHTMLOptions()
+    let g:html5_event_handler_attributes_complete = 1
+    let g:html5_rdfa_attributes_complete = 1
+    let g:html5_microdata_attributes_complete = 1
+    let g:html5_aria_attributes_complete = 1
+endfunction
+
+function SetJavaScriptOptions()
+    set colorcolumn=120
+endfunction
+
+function SetPHPOptions()
+    let g:phpcomplete_relax_static_constraint = 1
+    let g:phpcomplete_complete_for_unknown_classes = 1
+    let g:phpcomplete_search_tags_for_variables = 1
+    let g:phpcomplete_parse_docblock_comments = 1
+    set colorcolumn=85
+endfunction
+
+function SetPythonOptions()
+    let g:syntastic_javascript_checkers = ['jshint', 'jscs']
+    nnoremap <buffer> <F4> :exec '!clear; python' shellescape(@%, 1)<cr>
+endfunction
+
 augroup PrevimSettings
     autocmd!
     filetype on
     autocmd BufNewFile,BufRead *.{md,mdwn,mkd,mkdn,mark*} set filetype=markdown
-    autocmd FileType python nnoremap <buffer> <F4> :exec '!clear; python' shellescape(@%, 1)<cr>
+    autocmd FileType javascript call SetJavascriptOptions()
+    autocmd FileType php call SetPHPOptions()
+    autocmd FileType python call SetPythonOptions()
 augroup END
-
-filetype plugin on
