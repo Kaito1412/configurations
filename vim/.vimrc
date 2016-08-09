@@ -1,3 +1,6 @@
+""""""""""""""""""""""""""""""""""""""""""
+" PLugins
+""""""""""""""""""""""""""""""""""""""""""
 call plug#begin('~/.vim/plugged')
 Plug 'airblade/vim-gitgutter'
 Plug 'bling/vim-airline'
@@ -22,6 +25,10 @@ Plug 'vim-airline/vim-airline-themes'
 Plug 'vim-scripts/closetag.vim'
 call plug#end()
 
+
+""""""""""""""""""""""""""""""""""""""""""
+" Main options
+""""""""""""""""""""""""""""""""""""""""""
 syntax enable
 colorscheme monokai
 highlight ExtraWhitespace ctermbg=red guibg=red
@@ -58,6 +65,25 @@ cnoreabbrev aG Ack
 cnoreabbrev Ag Ack
 cnoreabbrev AG Ack
 
+
+""""""""""""""""""""""""""""""""""""""""""
+" Binding keys
+""""""""""""""""""""""""""""""""""""""""""
+inoremap jk            <Esc>
+inoremap <del>         <nop>
+inoremap <end>         <nop>
+inoremap <Home>        <nop>
+inoremap <PageUp>      <nop>
+inoremap <PageDown>    <nop>
+inoremap <up>          <nop>
+inoremap <down>        <nop>
+inoremap <left>        <nop>
+inoremap <right>       <nop>
+inoremap <LeftMouse>   <nop>
+inoremap <2-LeftMouse> <nop>
+inoremap <3-LeftMouse> <nop>
+inoremap <4-LeftMouse> <nop>
+
 nmap     <Enter>       [<Space>
 nnoremap j             gj
 nnoremap k             gk
@@ -75,42 +101,32 @@ nnoremap <2-LeftMouse> <nop>
 nnoremap <3-LeftMouse> <nop>
 nnoremap <4-LeftMouse> <nop>
 
-inoremap jk            <Esc>
-inoremap <del>         <nop>
-inoremap <end>         <nop>
-inoremap <Home>        <nop>
-inoremap <PageUp>      <nop>
-inoremap <PageDown>    <nop>
-inoremap <up>          <nop>
-inoremap <down>        <nop>
-inoremap <left>        <nop>
-inoremap <right>       <nop>
-inoremap <LeftMouse>   <nop>
-inoremap <2-LeftMouse> <nop>
-inoremap <3-LeftMouse> <nop>
-inoremap <4-LeftMouse> <nop>
 
+""""""""""""""""""""""""""""""""""""""""""
+" Specific configuration for each language
+""""""""""""""""""""""""""""""""""""""""""
 function SetHTMLOptions()
-    let g:html5_event_handler_attributes_complete = 1
-    let g:html5_rdfa_attributes_complete = 1
-    let g:html5_microdata_attributes_complete = 1
     let g:html5_aria_attributes_complete = 1
+    let g:html5_event_handler_attributes_complete = 1
+    let g:html5_microdata_attributes_complete = 1
+    let g:html5_rdfa_attributes_complete = 1
 endfunction
 
 function SetJavaScriptOptions()
+    let g:syntastic_javascript_checkers = ['jshint', 'jscs']
     set colorcolumn=120
 endfunction
 
 function SetPHPOptions()
-    let g:phpcomplete_relax_static_constraint = 1
     let g:phpcomplete_complete_for_unknown_classes = 1
-    let g:phpcomplete_search_tags_for_variables = 1
     let g:phpcomplete_parse_docblock_comments = 1
+    let g:phpcomplete_relax_static_constraint = 1
+    let g:phpcomplete_search_tags_for_variables = 1
     set colorcolumn=85
 endfunction
 
 function SetPythonOptions()
-    let g:syntastic_javascript_checkers = ['jshint', 'jscs']
+    let g:syntastic_python_checkers = ['flake8']
     nnoremap <buffer> <F4> :exec '!clear; python' shellescape(@%, 1)<cr>
 endfunction
 
@@ -118,6 +134,7 @@ augroup PrevimSettings
     autocmd!
     filetype on
     autocmd BufNewFile,BufRead *.{md,mdwn,mkd,mkdn,mark*} set filetype=markdown
+    autocmd FileType html call SetHTMLOptions()
     autocmd FileType javascript call SetJavascriptOptions()
     autocmd FileType php call SetPHPOptions()
     autocmd FileType python call SetPythonOptions()
