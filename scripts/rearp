@@ -1,0 +1,4 @@
+echo "disconnect 00:23:01:14:27:8A" | bluetoothctl
+sleep 5
+echo "connect 00:23:01:14:27:8A" | bluetoothctl
+

@@ -4,6 +4,7 @@ Plug 'bling/vim-airline'
 Plug 'ctrlpvim/ctrlp.vim'
 Plug 'edsono/vim-matchit'
 Plug 'joukevandermaas/vim-ember-hbs'
+Plug 'jscs-dev/node-jscs'
 Plug 'kannokanno/previm'
 Plug 'mileszs/ack.vim'
 Plug 'othree/html5.vim'
@@ -44,11 +45,13 @@ set undodir=~/.vim/undo_files//
 set pastetoggle=<F2>
 
 let g:airline_powerline_fonts = 1
+let g:ctrlp_user_command = ['.git', 'cd %s && git ls-files -co --exclude-standard']
 let g:previm_open_cmd = 'firefox'
 let g:syntastic_always_populate_loc_list = 1
 let g:syntastic_auto_loc_list = 1
 let g:syntastic_check_on_open = 1
 let g:syntastic_check_on_wq = 0
+let g:syntastic_javascript_checkers = ['jshint', 'jscs']
 
 let g:ackprg = 'ag --vimgrep --smart-case'
 cnoreabbrev ag Ack
@@ -92,8 +95,7 @@ augroup PrevimSettings
     autocmd!
     filetype on
     autocmd BufNewFile,BufRead *.{md,mdwn,mkd,mkdn,mark*} set filetype=markdown
-    autocmd FileType python \
-        nnoremap <buffer> <F4> :exec '!clear; python' shellescape(@%, 1)<cr>
+    autocmd FileType python nnoremap <buffer> <F4> :exec '!clear; python' shellescape(@%, 1)<cr>
 augroup END
 
 filetype plugin on
