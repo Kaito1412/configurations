@@ -12,14 +12,9 @@ fi
 sudo pacman -Syy --noconfirm
 sudo pacman -S --noconfirm yaourt
 yaourt -Syyu --noconfirm
-yaourt -S --noconfirm gvim docker git zsh xclip tmux zsh-syntax-highlighting archey3 python-virtualenv firefox evolution libreoffice firefox-i18n-es-es libreoffice-fresh-es gnome-tweak-tool blueman gimp corebird liferea mpv mps-youtube-git gdm alacarte mycli python-virtualenvwrapper youtube-dl gnome-shell-pomodoro sl silver-searcher-git
+yaourt -S --noconfirm gvim docker git zsh xclip tmux zsh-syntax-highlighting archey3 python-virtualenv firefox evolution libreoffice firefox-i18n-es-es libreoffice-fresh-es gnome-tweak-tool blueman gimp corebird liferea mpv mps-youtube-git gdm alacarte python-virtualenvwrapper youtube-dl gnome-shell-pomodoro sl silver-searcher-git
 
-yaourt -Rsn --noconfirm lightdm
-yaourt -Rsn --noconfirm gnome-documents
-yaourt -Rsn --noconfirm gnome-weather
-yaourt -Rsn --noconfirm gnome-maps
-yaourt -Rsn --noconfirm gnome-clocks
-yaourt -Rsn --noconfirm gnome-documents
+yaourt -Rsn --noconfirm lightdm gnome-documents gnome-weather gnome-maps gnome-clocks gnome-documents
 
 sudo systemctl disable lightdm
 sudo systemctl enable gdm
@@ -29,9 +24,9 @@ sudo usermod -s /usr/bin/zsh $USER
 sudo usermod -G docker $USER
 
 mkdir ~/.virtualenv
-virtualenv ~/.virtualenv/nodeenv
-source ~/.virtualenv/nodeenv/bin/activate
-pip install nodeenv
+virtualenv ~/.virtualenv/pyutils
+source ~/.virtualenv/pyutils/bin/activate
+pip install nodeenv mycli
 disable
 
 rm -rf ~/.gitconfig
