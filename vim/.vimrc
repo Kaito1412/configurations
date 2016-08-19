@@ -2,29 +2,36 @@
 " PLugins
 """"""""""""""""""""""""""""""""""""""""""
 call plug#begin('~/.vim/plugged')
+" Interface
 Plug 'airblade/vim-gitgutter'
 Plug 'bling/vim-airline'
-Plug 'ctrlpvim/ctrlp.vim'
-Plug 'edsono/vim-matchit'
-Plug 'joukevandermaas/vim-ember-hbs'
-Plug 'jscs-dev/node-jscs'
-Plug 'kannokanno/previm'
-Plug 'mileszs/ack.vim'
-Plug 'othree/html5.vim'
-Plug 'pangloss/vim-javascript'
-Plug 'Raimondi/delimitMate'
-Plug 'rking/ag.vim'
 Plug 'scrooloose/syntastic'
-Plug 'tpope/vim-commentary'
+Plug 'sickill/vim-monokai'
+Plug 'vim-airline/vim-airline-themes'
+Plug 'Valloric/YouCompleteMe'
+
+" Functions
+Plug 'mileszs/ack.vim'       " :ack
+Plug 'Raimondi/delimitMate'
 Plug 'tpope/vim-fugitive'
 Plug 'tpope/vim-sensible'
-Plug 'tpope/vim-surround'
-Plug 'tpope/vim-unimpaired'
-Plug 'Valloric/YouCompleteMe'
-Plug 'vim-airline/vim-airline-themes'
-Plug 'vim-scripts/closetag.vim'
-call plug#end()
 
+" Shortcuts
+Plug 'ctrlpvim/ctrlp.vim'    " ctrl p
+Plug 'tpope/vim-commentary'  " gcc
+Plug 'tpope/vim-surround'    " cs
+Plug 'tpope/vim-unimpaired'  "[<space> [q
+
+" HTML
+Plug 'othree/html5.vim'
+Plug 'vim-scripts/closetag.vim'
+
+" Javascript
+Plug 'jscs-dev/node-jscs'
+Plug 'joukevandermaas/vim-ember-hbs'
+Plug 'pangloss/vim-javascript'
+
+call plug#end()
 
 """"""""""""""""""""""""""""""""""""""""""
 " Main options
@@ -112,8 +119,8 @@ function SetHTMLOptions()
     let g:html5_rdfa_attributes_complete = 1
 endfunction
 
-function SetJavaScriptOptions()
-    let g:syntastic_javascript_checkers = ['jshint', 'jscs']
+function SetJavascriptOptions()
+    let g:syntastic_javascript_checkers = ['jshint']
     set colorcolumn=120
 endfunction
 
