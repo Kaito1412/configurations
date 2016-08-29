@@ -129,6 +129,7 @@ function SetPHPOptions()
     let g:phpcomplete_parse_docblock_comments = 1
     let g:phpcomplete_relax_static_constraint = 1
     let g:phpcomplete_search_tags_for_variables = 1
+    let g:syntastic_php_checkers = ['phpcs']
     set colorcolumn=85
 endfunction
 
