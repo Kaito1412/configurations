@@ -1,0 +1,18 @@
+# show which vim mode we are in
+function dynamic_prompt {
+    precmd() {
+      calc_env_prompt
+    }
+    zle-keymap-select() {
+      calc_env_prompt
+      [[ $KEYMAP = vicmd ]] && PROMPT="${ENV_PROMPT}${VI_PROMPT}"
+      () { return $__prompt_status }
+      zle reset-prompt
+    }
+    zle-line-init() {
+      typeset -g __prompt_status="$?"
+    }
+
+    zle -N zle-keymap-select
+    zle -N zle-line-init
+}
