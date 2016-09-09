@@ -1,6 +1,7 @@
 gsettings set org.gnome.desktop.wm.preferences button-layout "close,minimize,maximize:appmenu"
 gsettings set org.gnome.desktop.input-sources xkb-options "['caps:escape']"
 
+
 if ! grep -Fxq "[archlinuxfr]" /etc/pacman.conf
 then
     sudo echo '' >> /etc/pacman.conf
@@ -12,7 +13,7 @@ fi
 sudo pacman -Syy --noconfirm
 sudo pacman -S --noconfirm yaourt
 yaourt -Syyu --noconfirm
-yaourt -S --noconfirm gvim docker git zsh xclip tmux zsh-syntax-highlighting archey3 python-virtualenv firefox evolution libreoffice firefox-i18n-es-es libreoffice-fresh-es gnome-tweak-tool blueman gimp corebird liferea mpv mps-youtube-git gdm alacarte python-virtualenvwrapper youtube-dl gnome-shell-pomodoro sl silver-searcher-git
+yaourt -S --noconfirm gvim docker git zsh xclip tmux zsh-syntax-highlighting archey3 python-virtualenv firefox evolution libreoffice firefox-i18n-es-es libreoffice-fresh-es gnome-tweak-tool blueman gimp corebird liferea mpv mps-youtube-git gdm alacarte python-virtualenvwrapper youtube-dl gnome-shell-pomodoro sl silver-searcher-git xmodmap
 
 yaourt -Rsn --noconfirm lightdm gnome-documents gnome-weather gnome-maps gnome-clocks gnome-documents
 
@@ -44,6 +45,7 @@ ln -s ~/Workspace/configurations/zsh/.zsh ~/.zsh
 ln -s ~/Workspace/configurations/tmux/.tmux.conf ~/.tmux.conf
 ln -s ~/Workspace/configurations/scripts/ ~/.scripts
 ln -s ~/Workspace/configurations/virtualenv/.nodeenvrc ~/.nodeenvrc
+ln -s ~/Workspace/configurations/x/.Xmodmap ~/.Xmodmap
 
 mkdir -p ~/.vim/backup_files
 mkdir -p ~/.vim/swap_files

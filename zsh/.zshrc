@@ -76,9 +76,9 @@ preexec_functions+='preexec_update_git_vars'
 precmd_functions+='precmd_update_git_vars'
 chpwd_functions+='chpwd_update_git_vars'
 
-BASE_PROMPT='%{$fg_bold[cyan]%}%n%{$fg_bold[magenta]%}@%{$fg_bold[blue]%}%m %{$fg_bold[magenta]%}%1~$(prompt_git_info)'
-NORMAL_PROMPT="$BASE_PROMPT %{$fg_bold[cyan]%}$ %{$reset_color%}"
-VI_PROMPT="$BASE_PROMPT %{$fg_bold[green]%}$ %{$reset_color%}"
+BASE_PROMPT='%n%{$fg_bold[magenta]%}@%{$fg_bold[blue]%}%m %{$fg_bold[magenta]%}%1~$(prompt_git_info)'
+NORMAL_PROMPT="%{$fg_bold[cyan]%}$BASE_PROMPT %{$fg_bold[cyan]%}$ %{$reset_color%}"
+VI_PROMPT="%{$fg_bold[green]%}$BASE_PROMPT %{$fg_bold[green]%}$ %{$reset_color%}"
 
 PROMPT="${NORMAL_PROMPT}"
 
