@@ -15,6 +15,7 @@ Plug 'mileszs/ack.vim'       " :ack
 Plug 'Raimondi/delimitMate'
 Plug 'tpope/vim-fugitive'
 Plug 'tpope/vim-sensible'
+Plug 'tpope/vim-repeat'
 
 " Shortcuts
 Plug 'ctrlpvim/ctrlp.vim'    " ctrl p
