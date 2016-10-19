@@ -55,9 +55,12 @@ bindkey "ee[C"   forward-word
 bindkey "ee[D"   backward-word
 bindkey "^H"     backward-delete-word
 
-#Binding with control key
+# Binding with control key
 bindkey '^a'  beginning-of-line
 bindkey '^e'   end-of-line
+
+# Binding in vimmode
+bindkey -M vicmd '^R' history-incremental-search-backward
 
 # Allow for functions in the prompt.
 setopt PROMPT_SUBST
@@ -77,8 +80,8 @@ precmd_functions+='precmd_update_git_vars'
 chpwd_functions+='chpwd_update_git_vars'
 
 BASE_PROMPT='%n%{$fg_bold[magenta]%}@%{$fg_bold[blue]%}%m %{$fg_bold[magenta]%}%1~$(prompt_git_info)'
-NORMAL_PROMPT="%{$fg_bold[cyan]%}$BASE_PROMPT %{$fg_bold[cyan]%}$ %{$reset_color%}"
-VI_PROMPT="%{$fg_bold[green]%}$BASE_PROMPT %{$fg_bold[green]%}$ %{$reset_color%}"
+NORMAL_PROMPT="%{$fg_bold[cyan]%}$BASE_PROMPT %{$fg_bold[cyan]%}$%{$reset_color%} "
+VI_PROMPT="%{$fg_bold[green]%}$BASE_PROMPT %{$fg_bold[green]%}$%{$reset_color%} "
 
 PROMPT="${NORMAL_PROMPT}"
 

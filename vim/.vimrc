@@ -5,6 +5,7 @@ call plug#begin('~/.vim/plugged')
 " Interface
 Plug 'airblade/vim-gitgutter'
 Plug 'bling/vim-airline'
+Plug 'bling/vim-bufferline'
 Plug 'scrooloose/syntastic'
 Plug 'sickill/vim-monokai'
 Plug 'vim-airline/vim-airline-themes'
