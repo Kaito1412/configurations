@@ -1,8 +1,11 @@
 let g:netrw_dirhistmax  =10
-let g:netrw_dirhist_cnt =6
+let g:netrw_dirhist_cnt =9
 let g:netrw_dirhist_1='/home/kaito/Workspace/control_panel/app/templates/components'
 let g:netrw_dirhist_2='/usr/share/applications'
 let g:netrw_dirhist_3='/home/kaito/Workspace/configurations/.git/objects'
 let g:netrw_dirhist_4='/home/kaito/Workspace/control_panel'
 let g:netrw_dirhist_5='/home/kaito/Workspace/personal/contacts'
 let g:netrw_dirhist_6='/home/kaito/Workspace/control_panel/config'
+let g:netrw_dirhist_7='/home/kaito/Workspace/gigas_devenv/router'
+let g:netrw_dirhist_8='/home/kaito/Workspace/gigas_devenv/router/add_files'
+let g:netrw_dirhist_9='/home/kaito/Workspace/gigas_executor/gigas_executor/transactions'

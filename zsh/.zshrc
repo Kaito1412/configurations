@@ -39,7 +39,6 @@ promptinit
 
 bindkey -v
 bindkey '^R' history-incremental-search-backward
-bindkey -M viins 'jk' vi-cmd-mode
 bindkey "^[[3~"  delete-char
 bindkey "^[3;5~" delete-char
 bindkey '\e[1~'  beginning-of-line
@@ -55,12 +54,9 @@ bindkey "ee[C"   forward-word
 bindkey "ee[D"   backward-word
 bindkey "^H"     backward-delete-word
 
-# Binding with control key
-bindkey '^a'  beginning-of-line
-bindkey '^e'   end-of-line
-
 # Binding in vimmode
 bindkey -M vicmd '^R' history-incremental-search-backward
+bindkey -M viins 'jk' vi-cmd-mode
 
 # Allow for functions in the prompt.
 setopt PROMPT_SUBST
@@ -79,9 +75,11 @@ preexec_functions+='preexec_update_git_vars'
 precmd_functions+='precmd_update_git_vars'
 chpwd_functions+='chpwd_update_git_vars'
 
+MAIN_COLOR="%{%(#~$fg_bold[red]~$fg_bold[cyan])%}"
+SYMBOL="%{%(#~#~$)%}"
 BASE_PROMPT='%n%{$fg_bold[magenta]%}@%{$fg_bold[blue]%}%m %{$fg_bold[magenta]%}%1~$(prompt_git_info)'
-NORMAL_PROMPT="%{$fg_bold[cyan]%}$BASE_PROMPT %{$fg_bold[cyan]%}$%{$reset_color%} "
-VI_PROMPT="%{$fg_bold[green]%}$BASE_PROMPT %{$fg_bold[green]%}$%{$reset_color%} "
+NORMAL_PROMPT="${MAIN_COLOR}${BASE_PROMPT} ${MAIN_COLOR}${SYMBOL}%{$reset_color%} "
+VI_PROMPT="%{$fg_bold[green]%}$BASE_PROMPT %{$fg_bold[green]%}$SYMBOL%{$reset_color%} "
 
 PROMPT="${NORMAL_PROMPT}"
 
