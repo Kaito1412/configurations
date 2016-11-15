@@ -1,8 +1,7 @@
+gsettings set org.gnome.desktop.input-sources xkb-options "['caps:escape']"
 gsettings set org.gnome.desktop.wm.preferences button-layout "close,minimize,maximize:appmenu"
 gsettings set org.gnome.desktop.wm.keybindings maximize "['<Super>k']"
 gsettings set org.gnome.desktop.wm.keybindings minimize "[]"
-gsettings set org.gnome.desktop.wm.keybindings maximize-horizontally "['<Super>h']"
-gsettings set org.gnome.desktop.wm.keybindings maximize-vertically "['<Super>l']"
 gsettings set org.gnome.desktop.wm.keybindings unmaximize "['<Super>j']"
 gsettings set org.gnome.desktop.wm.keybindings move-to-monitor-left "['<Primary><Shift><Alt>h']"
 gsettings set org.gnome.desktop.wm.keybindings move-to-monitor-right "['<Primary><Shift><Alt>l']"
@@ -13,7 +12,6 @@ gsettings set org.gnome.desktop.wm.keybindings switch-to-workspace-down "['<Prim
 gsettings set org.gnome.desktop.wm.keybindings switch-to-workspace-up "['<Primary><Alt>k']"
 gsettings set org.gnome.desktop.wm.keybindings switch-to-workspace-left "['<Primary><Alt>h']"
 gsettings set org.gnome.desktop.wm.keybindings switch-to-workspace-right "['<Primary><Alt>l']"
-gsettings set org.gnome.desktop.input-sources xkb-options "['caps:escape']"
 
 
 if ! grep -Fxq "[archlinuxfr]" /etc/pacman.conf
@@ -61,7 +59,6 @@ ln -s ~/Workspace/configurations/zsh/.zsh ~/.zsh
 ln -s ~/Workspace/configurations/tmux/.tmux.conf ~/.tmux.conf
 ln -s ~/Workspace/configurations/scripts/ ~/.scripts
 ln -s ~/Workspace/configurations/virtualenv/.nodeenvrc ~/.nodeenvrc
-ln -s ~/Workspace/configurations/x/.Xmodmap ~/.Xmodmap
 ln -s ~/Workspace/configurations/others/.myclirc ~/.myclirc
 ln -s ~/Workspace/configurations/others/.archey3.cfg ~/.archey3.cfg
 

@@ -75,12 +75,16 @@ preexec_functions+='preexec_update_git_vars'
 precmd_functions+='precmd_update_git_vars'
 chpwd_functions+='chpwd_update_git_vars'
 
-MAIN_COLOR="%{%(#~$fg_bold[red]~$fg_bold[cyan])%}"
-SYMBOL="%{%(#~#~$)%}"
+MAIN_COLOR="%{%(#~%{$fg_bold[red]%}~%{$fg_bold[cyan]%})%}"
+SYMBOL="$%{$reset_color%} "
+# SYMBOL="%{%(#~#~$)%}%{$reset_color%} "
 BASE_PROMPT='%n%{$fg_bold[magenta]%}@%{$fg_bold[blue]%}%m %{$fg_bold[magenta]%}%1~$(prompt_git_info)'
-NORMAL_PROMPT="${MAIN_COLOR}${BASE_PROMPT} ${MAIN_COLOR}${SYMBOL}%{$reset_color%} "
-VI_PROMPT="%{$fg_bold[green]%}$BASE_PROMPT %{$fg_bold[green]%}$SYMBOL%{$reset_color%} "
+NORMAL_PROMPT="${MAIN_COLOR}${BASE_PROMPT} ${MAIN_COLOR}${SYMBOL}"
+VI_PROMPT="%{$fg_bold[green]%}$BASE_PROMPT %{$fg_bold[green]%}${SYMBOL}"
+
 
 PROMPT="${NORMAL_PROMPT}"
 
 dynamic_prompt
+
+export PATH="$PATH:$HOME/.rvm/bin" # Add RVM to PATH for scripting

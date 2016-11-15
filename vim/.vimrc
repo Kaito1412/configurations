@@ -11,9 +11,9 @@ Plug 'vim-airline/vim-airline-themes'
 Plug 'Valloric/YouCompleteMe'
 
 " Functions
+Plug 'jiangmiao/auto-pairs'
 Plug 'jmcantrell/vim-virtualenv'   " :VirtualEnvActivate
 Plug 'mileszs/ack.vim'             " :ack
-Plug 'Raimondi/delimitMate'
 Plug 'tpope/vim-fugitive'
 Plug 'tpope/vim-sensible'
 Plug 'tpope/vim-repeat'
@@ -25,10 +25,13 @@ Plug 'tpope/vim-surround'          " cs
 Plug 'tpope/vim-unimpaired'        "[<space> [q
 
 " HTML
+Plug 'alvan/vim-closetag'
+Plug 'gregsexton/matchtag'
+Plug 'mattn/emmet-vim'             " <ctrl>y,
 Plug 'othree/html5.vim'
-Plug 'vim-scripts/closetag.vim'
 
 " Javascript
+Plug 'leafgarland/typescript-vim'
 Plug 'jscs-dev/node-jscs'
 Plug 'joukevandermaas/vim-ember-hbs'
 Plug 'pangloss/vim-javascript'
