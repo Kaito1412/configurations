@@ -25,7 +25,7 @@ fi
 sudo pacman -Syy --noconfirm
 sudo pacman -S --noconfirm yaourt
 yaourt -Syyu --noconfirm
-yaourt -S --noconfirm gvim docker git zsh xclip tmux zsh-syntax-highlighting archey3 python-virtualenv firefox evolution firefox-i18n-es-es gnome-tweak-tool blueman gimp corebird liferea mpv mps-youtube-git gdm alacarte python-virtualenvwrapper youtube-dl gnome-shell-pomodoro sl silver-searcher-git lsb-release pulseaudio-alsa pulseaudio-bluetooth bluez bluez-libs bluez-utils bluez-firmware
+yaourt -S --noconfirm gvim docker git zsh xclip tmux zsh-syntax-highlighting archey3 python-virtualenv firefox evolution firefox-i18n-es-es gnome-tweak-tool blueman gimp corebird liferea mpv mps-youtube-git gdm alacarte python-virtualenvwrapper youtube-dl gnome-shell-pomodoro sl silver-searcher-git lsb-release pulseaudio-alsa pulseaudio-bluetooth bluez bluez-libs bluez-utils bluez-firmware ruby
 
 yaourt -Rsn --noconfirm lightdm gnome-documents gnome-weather gnome-maps gnome-shell-extension-status-menu-buttons lightdm-webkit2-greeter light-locker light-locker-settings
 
@@ -41,6 +41,8 @@ virtualenv ~/.virtualenv/pyutils
 source ~/.virtualenv/pyutils/bin/activate
 pip install nodeenv
 deactivate
+
+gem install ruby-virtualenv
 
 rm -rf ~/.gitconfig
 rm -rf ~/.vimrc

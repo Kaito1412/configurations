@@ -6,6 +6,9 @@ function calc_env_prompt {
     if [[ "$NODE_VIRTUAL_ENV" != "" ]]; then
       ENV_PROMPT="%{$fg_bold[green]%}⎔ `basename \"$NODE_VIRTUAL_ENV\"` "
     fi
+    if [[ "$SANDBOX_ENV" != "" ]]; then
+      ENV_PROMPT="%{$fg_bold[red]%}◆ `basename \"$SANDBOX_ENV"` "
+    fi
     if [[ "$VIRTPHP_ENV_PATH" != "" ]]; then
       ENV_PROMPT="%{$fg_bold[blue]%}(%{$fg_bold[white]%}PHP%{$fg_bold[blue]%}) `basename \"${VIRTPHP_ENV_PATH#/home/kaito/.virtphp/envs/}"` "
     fi
