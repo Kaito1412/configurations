@@ -9,6 +9,9 @@ function error_handler {
 }
 
 PATH=$PATH:$HOME/.scripts
+GEM_HOME=$(ls -t -U | ruby -e 'puts Gem.user_dir')
+GEM_PATH=$GEM_HOME
+export PATH=$PATH:$GEM_HOME/bin
 export EDITOR=/usr/bin/vim
 
 trap 'error_handler' ERR
