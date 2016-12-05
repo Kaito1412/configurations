@@ -9,13 +9,14 @@
     rb = rebase
     ci = commit
     ft = fetch
+    d  = difftool
+[color]
+    ui = auto
 [diff]
     tool = vimdiff
+[difftool]
+    prompt = false
 [merge]
     tool = vimdiff
 [push]
     default = current
-[difftool]
-    prompt = false
-[color]
-    ui = auto

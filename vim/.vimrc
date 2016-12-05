@@ -17,6 +17,8 @@ Plug 'mileszs/ack.vim'             " :ack
 Plug 'tpope/vim-fugitive'
 Plug 'tpope/vim-sensible'
 Plug 'tpope/vim-repeat'
+Plug 'davidosomething/syntastic-hbstidy'
+
 
 " Shortcuts
 Plug 'ctrlpvim/ctrlp.vim'          " ctrl p
@@ -150,8 +152,6 @@ function SetPythonOptions()
     let g:syntastic_python_checkers = ['flake8']
     set colorcolumn=80
     nnoremap <buffer> <F4> :exec '!clear; python' shellescape(@%, 1)<cr>
-    command! Py2 call ChangePython(2)
-    command! Py3 call ChangePython(3)
 endfunction
 
 augroup PrevimSettings
@@ -163,21 +163,3 @@ augroup PrevimSettings
     autocmd FileType php call SetPHPOptions()
     autocmd FileType python call SetPythonOptions()
 augroup END
-
-""""""""""""""""""""""""""""""""""""""""""
-" Custom functions
-""""""""""""""""""""""""""""""""""""""""""
-" Cambia Syntastic para funcionar con Python 2.x o Python 3.x
-function! ChangePython(ver)
-    if a:ver == 2
-        echo "Switch to Python 2.x"
-        let g:syntastic_python_python_exec = '/usr/bin/python2'
-        let g:syntastic_python_flake8_exec = '/usr/bin/flake8-python2'
-    elseif a:ver == 3
-        echo "Switch to Python 3.x"
-        let g:syntastic_python_python_exec = '/usr/bin/python3'
-        let g:syntastic_python_flake8_exec = '/usr/bin/flake8'
-    else
-        echoerr "ERROR: Unknown Python version (use 2 or 3)"
-    endif
-endfunction
