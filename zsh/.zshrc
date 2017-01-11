@@ -21,19 +21,19 @@ HISTSIZE=1000
 export HISTFILE="$HOME/.history"
 export SAVEHIST=$HISTSIZE
 export WORKON_HOME=~/.virtualenvs
-source /usr/bin/virtualenvwrapper.sh
+source /usr/local/bin/virtualenvwrapper.sh
 setopt incappendhistory
 
 # Resaltado de sintaxis. Hace Falta tener instalado
-source /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+source /usr/local/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
 
 [[ $- != *i* ]] && return
-if [ -f /usr/bin/archey3 ]; then archey3; fi
+if [ -f /usr/local/bin/archey ]; then archey; fi
 alias reload="~/.zshrc"
-alias ls='ls --color=auto'
 alias pacman='pacman --color=always'
 alias grep='grep --color'
 alias vi='vim'
+alias tmux="tmux -2"
 
 autoload -U compinit promptinit
 autoload -U colors && colors

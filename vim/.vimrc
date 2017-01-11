@@ -66,6 +66,7 @@ set statusline+=%{SyntasticStatuslineFlag()}
 set statusline+=%*
 set undodir=~/.vim/undo_files//
 set pastetoggle=<F2>
+set t_Co=256
 
 let g:ackprg = 'ag --vimgrep --smart-case'
 let g:airline_powerline_fonts = 1
