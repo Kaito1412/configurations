@@ -1,7 +1,7 @@
 function calc_env_prompt {
     ENV_PROMPT=""
     if [[ "$VIRTUAL_ENV" != "" ]]; then
-        ENV_PROMPT="%{$fg_bold[blue]%}ಓ %{$fg_bold[yellow]%}`basename \"$VIRTUAL_ENV\"` "
+        ENV_PROMPT="%{$fg_bold[blue]%}☡ %{$fg_bold[yellow]%}`basename \"$VIRTUAL_ENV\"` "
     fi
     if [[ "$NODE_VIRTUAL_ENV" != "" ]]; then
       ENV_PROMPT="%{$fg_bold[green]%}⎔ `basename \"$NODE_VIRTUAL_ENV\"` "

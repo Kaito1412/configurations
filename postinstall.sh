@@ -2,16 +2,16 @@ gsettings set org.gnome.desktop.input-sources xkb-options "['caps:escape']"
 gsettings set org.gnome.desktop.wm.preferences button-layout "close,minimize,maximize:appmenu"
 gsettings set org.gnome.desktop.wm.keybindings maximize "['<Super>k']"
 gsettings set org.gnome.desktop.wm.keybindings minimize "[]"
-gsettings set org.gnome.desktop.wm.keybindings unmaximize "['<Super>j']"
+gsettings set org.gnome.desktop.wm.keybindings move-to-workspace-down "['<Primary><Shift><Alt>j']"
 gsettings set org.gnome.desktop.wm.keybindings move-to-monitor-left "['<Primary><Shift><Alt>h']"
 gsettings set org.gnome.desktop.wm.keybindings move-to-monitor-right "['<Primary><Shift><Alt>l']"
-gsettings set org.gnome.desktop.wm.keybindings move-to-workspace-down "['<Primary><Shift><Alt>j']"
 gsettings set org.gnome.desktop.wm.keybindings move-to-workspace-up "['<Primary><Shift><Alt>k']"
 gsettings set org.gnome.desktop.wm.keybindings panel-run-dialog "['<Alt>2', '<Alt>F2']"
 gsettings set org.gnome.desktop.wm.keybindings switch-to-workspace-down "['<Primary><Alt>j']"
-gsettings set org.gnome.desktop.wm.keybindings switch-to-workspace-up "['<Primary><Alt>k']"
 gsettings set org.gnome.desktop.wm.keybindings switch-to-workspace-left "['<Primary><Alt>h']"
 gsettings set org.gnome.desktop.wm.keybindings switch-to-workspace-right "['<Primary><Alt>l']"
+gsettings set org.gnome.desktop.wm.keybindings switch-to-workspace-up "['<Primary><Alt>k']"
+gsettings set org.gnome.desktop.wm.keybindings unmaximize "['<Super>j']"
 
 
 if ! grep -Fxq "[archlinuxfr]" /etc/pacman.conf
@@ -61,8 +61,11 @@ ln -s ~/Workspace/configurations/zsh/.zsh ~/.zsh
 ln -s ~/Workspace/configurations/tmux/.tmux.conf ~/.tmux.conf
 ln -s ~/Workspace/configurations/scripts/ ~/.scripts
 ln -s ~/Workspace/configurations/virtualenv/.nodeenvrc ~/.nodeenvrc
+ln -s Workspace/configurations/soundfonts ~/.soundfonts
 ln -s ~/Workspace/configurations/others/.myclirc ~/.myclirc
 ln -s ~/Workspace/configurations/others/.archey3.cfg ~/.archey3.cfg
+ln -s ~/Workspace/configurations/X/.xinitrc ~/.xinitrc
+ln -s ~/Workspace/configurations/X/.Xmodmap ~/.Xmodmap
 
 mkdir -p ~/.vim/backup_files
 mkdir -p ~/.vim/swap_files

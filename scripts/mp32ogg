@@ -1,0 +1,6 @@
+find . -type f -name '*.mp3' -exec bash -c 'ffmpeg -i "$0" -c:a libvorbis -q:a 4 "${0/%mp3/ogg}"' '{}' \; > /dev/null 2>&1 &
+while [ $(find . -name '*.ogg' | wc -l) -lt $(find . -name '*.mp3' | wc -l) ]; do
+echo -ne $(find . -name '*.ogg' | wc -l) de $(find . -name '*.mp3' | wc -l)\\r
+sleep 2
+done
+find . -name '*.mp3' -delete

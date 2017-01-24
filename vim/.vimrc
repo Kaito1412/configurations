@@ -4,6 +4,7 @@
 call plug#begin('~/.vim/plugged')
 " Interface
 Plug 'airblade/vim-gitgutter'
+Plug 'christoomey/vim-tmux-navigator'
 Plug 'scrooloose/syntastic'
 Plug 'sickill/vim-monokai'
 Plug 'vim-airline/vim-airline'
@@ -56,9 +57,9 @@ set expandtab
 set mouse=a
 set number
 set relativenumber
-set shiftwidth=4
+set shiftwidth=2
 set showcmd
-set softtabstop=4
+set softtabstop=2
 set statusline+=%#warningmsg#
 set statusline+=%{SyntasticStatuslineFlag()}
 set statusline+=%*
@@ -77,7 +78,6 @@ let g:syntastic_check_on_open = 1
 let g:syntastic_check_on_wq = 0
 let g:virtualenv_auto_activate = 1
 let g:virtualenv_stl_format = '[%n]'
-
 
 cnoreabbrev ag Ack
 cnoreabbrev aG Ack
@@ -119,6 +119,7 @@ nnoremap <LeftMouse>   <nop>
 nnoremap <2-LeftMouse> <nop>
 nnoremap <3-LeftMouse> <nop>
 nnoremap <4-LeftMouse> <nop>
+nnoremap <Tab> :bn<CR>
 
 
 """"""""""""""""""""""""""""""""""""""""""
@@ -148,10 +149,16 @@ endfunction
 
 function SetPythonOptions()
     let g:syntastic_python_checkers = ['flake8']
+    set shiftwidth=4
+    set softtabstop=4
     set colorcolumn=80
     nnoremap <buffer> <F4> :exec '!clear; python' shellescape(@%, 1)<cr>
-    command! Py2 call ChangePython(2)
-    command! Py3 call ChangePython(3)
+endfunction
+
+function SetTypescriptOptions()
+    let g:syntastic_typescript_checkers = ['jshint', 'jscs', 'tslint']
+    let g:syntastic_aggregate_errors = 1
+    set colorcolumn=140
 endfunction
 
 augroup PrevimSettings
@@ -162,22 +169,5 @@ augroup PrevimSettings
     autocmd FileType javascript call SetJavascriptOptions()
     autocmd FileType php call SetPHPOptions()
     autocmd FileType python call SetPythonOptions()
+    autocmd FileType typescript call SetTypescriptOptions()
 augroup END
-
-""""""""""""""""""""""""""""""""""""""""""
-" Custom functions
-""""""""""""""""""""""""""""""""""""""""""
-" Cambia Syntastic para funcionar con Python 2.x o Python 3.x
-function! ChangePython(ver)
-    if a:ver == 2
-        echo "Switch to Python 2.x"
-        let g:syntastic_python_python_exec = '/usr/bin/python2'
-        let g:syntastic_python_flake8_exec = '/usr/bin/flake8-python2'
-    elseif a:ver == 3
-        echo "Switch to Python 3.x"
-        let g:syntastic_python_python_exec = '/usr/bin/python3'
-        let g:syntastic_python_flake8_exec = '/usr/bin/flake8'
-    else
-        echoerr "ERROR: Unknown Python version (use 2 or 3)"
-    endif
-endfunction
