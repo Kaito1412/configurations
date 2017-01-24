@@ -155,12 +155,15 @@ function SetPythonOptions()
     set softtabstop=4
     set colorcolumn=80
     nnoremap <buffer> <F4> :exec '!clear; python' shellescape(@%, 1)<cr>
+<<<<<<< HEAD
 endfunction
 
 function SetTypescriptOptions()
     let g:syntastic_typescript_checkers = ['jshint', 'jscs', 'tslint']
     let g:syntastic_aggregate_errors = 1
     set colorcolumn=140
+=======
+>>>>>>> 106f9d7490a94f20ed4f11ec9c4e5f06dd461b14
 endfunction
 
 augroup PrevimSettings
