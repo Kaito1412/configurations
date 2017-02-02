@@ -1,5 +1,4 @@
 gsettings set org.gnome.desktop.input-sources xkb-options "['caps:escape']"
-gsettings set org.gnome.desktop.wm.preferences button-layout "close,minimize,maximize:appmenu"
 gsettings set org.gnome.desktop.wm.keybindings maximize "['<Super>k']"
 gsettings set org.gnome.desktop.wm.keybindings minimize "[]"
 gsettings set org.gnome.desktop.wm.keybindings move-to-workspace-down "['<Primary><Shift><Alt>j']"
@@ -12,6 +11,7 @@ gsettings set org.gnome.desktop.wm.keybindings switch-to-workspace-left "['<Prim
 gsettings set org.gnome.desktop.wm.keybindings switch-to-workspace-right "['<Primary><Alt>l']"
 gsettings set org.gnome.desktop.wm.keybindings switch-to-workspace-up "['<Primary><Alt>k']"
 gsettings set org.gnome.desktop.wm.keybindings unmaximize "['<Super>j']"
+gsettings set org.gnome.desktop.wm.preferences button-layout "close,minimize,maximize:appmenu"
 
 
 if ! grep -Fxq "[archlinuxfr]" /etc/pacman.conf
@@ -53,6 +53,8 @@ rm -rf ~/.tmux.conf
 rm -rf ~/.myclirc
 rm -rf ~/.archey3.cfg
 
+mkdir -p ~/.config/autostart
+
 ln -s ~/Workspace/configurations/git/.gitconfig ~/.gitconfig
 ln -s ~/Workspace/configurations/vim/.vimrc ~/.vimrc
 ln -s ~/Workspace/configurations/vim/.vim ~/.vim
@@ -64,8 +66,10 @@ ln -s ~/Workspace/configurations/virtualenv/.nodeenvrc ~/.nodeenvrc
 ln -s Workspace/configurations/soundfonts ~/.soundfonts
 ln -s ~/Workspace/configurations/others/.myclirc ~/.myclirc
 ln -s ~/Workspace/configurations/others/.archey3.cfg ~/.archey3.cfg
-ln -s ~/Workspace/configurations/X/.xinitrc ~/.xinitrc
-ln -s ~/Workspace/configurations/X/.Xmodmap ~/.Xmodmap
+ln -s ~/Workspace/configurations/others/.initrc ~/.initrc
+ln -s ~/Workspace/configurations/others/myinit.desktop ~/.config/autostart/myinit.desktop
+
+chmod +x ~/.initrc
 
 mkdir -p ~/.vim/backup_files
 mkdir -p ~/.vim/swap_files

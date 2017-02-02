@@ -20,7 +20,6 @@ Plug 'tpope/vim-sensible'
 Plug 'tpope/vim-repeat'
 Plug 'davidosomething/syntastic-hbstidy'
 
-
 " Shortcuts
 Plug 'ctrlpvim/ctrlp.vim'          " ctrl p
 Plug 'tpope/vim-commentary'        " gcc
@@ -50,11 +49,11 @@ highlight ExtraWhitespace ctermbg=red guibg=red
 match ExtraWhitespace /\s\+$/
 
 set backup
-set backupdir=~/.vim/backup_files//
+set backupdir=~/.vim/tmp
 set colorcolumn=80
 set cursorline
 set diffopt+=vertical
-set directory=~/.vim/swap_files//
+set directory=~/.vim/tmp
 set expandtab
 set mouse=a
 set number
@@ -65,7 +64,8 @@ set softtabstop=2
 set statusline+=%#warningmsg#
 set statusline+=%{SyntasticStatuslineFlag()}
 set statusline+=%*
-set undodir=~/.vim/undo_files//
+set undodir=~/.vim/tmp
+set undofile
 set pastetoggle=<F2>
 
 let g:ackprg = 'ag --vimgrep --smart-case'
