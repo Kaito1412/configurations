@@ -1,6 +1,8 @@
 [user]
     name = Carlos Mateu
-    email = carlos.mateu@gigas.com
+    email = carlos.mateu@kairosds.com
+[core]
+    editor = vim
 [alias]
     pl = log --graph --decorate --format=format:'%C(bold blue)%H%C(reset) - %C(reset) %C(bold green)(%ar)%C(reset)%C(bold yellow)%d%C(reset)%n''          %C(white)%s%C(reset) %C(dim white)- %an%C(reset)' --all
     st = status
