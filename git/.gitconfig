@@ -8,8 +8,10 @@
     br = branch
     ci = commit
     co = checkout
+    cp = cherry-pick
     d  = difftool
     ft = fetch
+    mg  = merge
     m  = mergetool
     pl = log --graph --decorate --format=format:'%C(bold blue)%H%C(reset) - %C(reset) %C(bold green)(%ar)%C(reset)%C(bold yellow)%d%C(reset)%n''          %C(white)%s%C(reset) %C(dim white)- %an%C(reset)' --all
     rb = rebase
