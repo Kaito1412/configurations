@@ -133,12 +133,19 @@ function SetHTMLOptions()
     let g:html5_event_handler_attributes_complete = 1
     let g:html5_microdata_attributes_complete = 1
     let g:html5_rdfa_attributes_complete = 1
+    let g:syntastic_aggregate_errors = 0
+    let g:syntastic_html_checkers = []
 endfunction
 
 function SetJavascriptOptions()
     let g:syntastic_javascript_checkers = ['jshint', 'jscs']
     let g:syntastic_aggregate_errors = 1
     set colorcolumn=100
+endfunction
+
+function SetMarkdownOptions()
+    set wrap
+    set linebreak
 endfunction
 
 function SetPHPOptions()
@@ -170,6 +177,7 @@ augroup PrevimSettings
     autocmd BufNewFile,BufRead *.{md,mdwn,mkd,mkdn,mark*} set filetype=markdown
     autocmd FileType html call SetHTMLOptions()
     autocmd FileType javascript call SetJavascriptOptions()
+    autocmd FileType markdown call SetMarkdownOptions()
     autocmd FileType php call SetPHPOptions()
     autocmd FileType python call SetPythonOptions()
     autocmd FileType typescript call SetTypescriptOptions()
