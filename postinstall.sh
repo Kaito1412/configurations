@@ -53,8 +53,6 @@ rm -rf ~/.tmux.conf
 rm -rf ~/.myclirc
 rm -rf ~/.archey3.cfg
 
-mkdir -p ~/.config/autostart
-
 ln -s ~/Workspace/configurations/git/.gitconfig ~/.gitconfig
 ln -s ~/Workspace/configurations/vim/.vimrc ~/.vimrc
 ln -s ~/Workspace/configurations/vim/.vim ~/.vim
@@ -69,8 +67,4 @@ ln -s ~/Workspace/configurations/others/.archey3.cfg ~/.archey3.cfg
 ln -s ~/Workspace/configurations/others/.initrc ~/.initrc
 ln -s ~/Workspace/configurations/others/myinit.desktop ~/.config/autostart/myinit.desktop
 
-chmod +x ~/.initrc
-
-mkdir -p ~/.vim/backup_files
-mkdir -p ~/.vim/swap_files
-mkdir -p ~/.vim/undo_files
+mkdir -p ~/.vim/tmp
