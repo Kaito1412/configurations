@@ -1,9 +1,0 @@
-let g:netrw_dirhistmax  =10
-let g:netrw_dirhist_cnt =7
-let g:netrw_dirhist_1='/home/kaito/.zsh'
-let g:netrw_dirhist_2='/home/kaito/.conky'
-let g:netrw_dirhist_3='/run/media/kaito/FC5A-A0C6/fede-v0.3.1-darwin-x64/scripts'
-let g:netrw_dirhist_4='/home/kaito/Workspace/bankinter/ft-popcoin/src/app/scss/base'
-let g:netrw_dirhist_5='/home/kaito/Workspace/bankinter/ft-popcoin/node_modules/karma-jasmine'
-let g:netrw_dirhist_6='/home/kaito/Workspace/bankinter/ft-popcoin/.git'
-let g:netrw_dirhist_7='/home/kaito/Workspace/bankinter/ft-popcoin/src/app/shared/components/utils'
