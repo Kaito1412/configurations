@@ -1,2 +1,5 @@
 vim/.vim/plugged/
 vim/.vim/tmp
+vim/.vim/backup_files
+vim/.vim/swap_files
+vim/.vim/undo_files

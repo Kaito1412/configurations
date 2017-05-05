@@ -13,13 +13,13 @@ Plug 'vim-airline/vim-airline-themes'
 Plug 'Valloric/YouCompleteMe'
 
 " Functions
+Plug 'davidosomething/syntastic-hbstidy'
 Plug 'jiangmiao/auto-pairs'
 Plug 'jmcantrell/vim-virtualenv'   " :VirtualEnvActivate
 Plug 'mileszs/ack.vim'             " :ack
 Plug 'tpope/vim-fugitive'
 Plug 'tpope/vim-sensible'
 Plug 'tpope/vim-repeat'
-Plug 'davidosomething/syntastic-hbstidy'
 
 " Shortcuts
 Plug 'ctrlpvim/ctrlp.vim'          " ctrl p
@@ -50,11 +50,11 @@ highlight ExtraWhitespace ctermbg=red guibg=red
 match ExtraWhitespace /\s\+$/
 
 set backup
-set backupdir=~/.vim/tmp
+set backupdir=~/.vim/backup_files
 set colorcolumn=80
 set cursorline
 set diffopt+=vertical
-set directory=~/.vim/tmp
+set directory=~/.vim/swap_files
 set expandtab
 set mouse=a
 set number
@@ -65,7 +65,7 @@ set softtabstop=2
 set statusline+=%#warningmsg#
 set statusline+=%{SyntasticStatuslineFlag()}
 set statusline+=%*
-set undodir=~/.vim/tmp
+set undodir=~/.vim/undo_files
 set undofile
 set pastetoggle=<F2>
 

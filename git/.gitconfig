@@ -7,15 +7,23 @@
     a = add
     br = branch
     ci = commit
+    cl = clean
     co = checkout
     cp = cherry-pick
     d  = difftool
     ft = fetch
+    l = log
+    lp = log --graph --decorate --format=format:'%C(bold blue)%H%C(reset) - %C(reset) %C(bold green)(%ar)%C(reset)%C(bold yellow)%d%C(reset)%n''          %C(white)%s%C(reset) %C(dim white)- %an%C(reset)' --all
     mg  = merge
     m  = mergetool
-    pl = log --graph --decorate --format=format:'%C(bold blue)%H%C(reset) - %C(reset) %C(bold green)(%ar)%C(reset)%C(bold yellow)%d%C(reset)%n''          %C(white)%s%C(reset) %C(dim white)- %an%C(reset)' --all
     rb = rebase
+    rf = reflog
+    rs = reset
+    rsh = reset --hard
+    rss = reset --soft
     st = status
+    sh = stash
+    sa = stash apply stash
 [color]
     ui = auto
 [diff]
