@@ -1,38 +1,43 @@
 [user]
-    name = Kaito Mateu
-    email = kaito@cryptolab.net
+  name = Kaito Mateu
+  email = kaito@cryptolab.net
 [core]
-    editor = vim
+  editor = vim
 [alias]
-    a = add
-    br = branch
-    ci = commit
-    cl = clean
-    co = checkout
-    cp = cherry-pick
-    d  = difftool
-    ft = fetch
-    l = log
-    lp = log --graph --decorate --format=format:'%C(bold blue)%H%C(reset) - %C(reset) %C(bold green)(%ar)%C(reset)%C(bold yellow)%d%C(reset)%n''          %C(white)%s%C(reset) %C(dim white)- %an%C(reset)' --all
-    mg  = merge
-    m  = mergetool
-    rb = rebase
-    rf = reflog
-    rs = reset
-    rsh = reset --hard
-    rss = reset --soft
-    st = status
-    sh = stash
-    sa = stash apply stash
+  a = add
+  br = branch
+  c = commit
+  ca = commit --amend
+  cm = commit -m
+  cl = clean
+  co = checkout
+  cp = cherry-pick
+  dt = difftool
+  ft = fetch
+  l = l
+  la = log --all
+  lp = log --graph --decorate --format=format:'%C(bold blue)%H%C(reset) - %C(reset) %C(bold green)(%ar)%C(reset)%C(bold yellow)%d%C(reset)%n''          %C(white)%s%C(reset) %C(dim white)- %an%C(reset)' --all
+  mg  = merge
+  mt = mergetool
+  r = reset
+  rb = rebase
+  rf = reflog
+  rh = reset --hard
+  rs = reset --soft
+  rv = revert
+  s = stash
+  sa = stash apply stash
+  sl = stash list
+  st = status
 [color]
-    ui = auto
+  ui = auto
 [diff]
-    tool = vimdiff
+  tool = vimdiff
 [difftool]
-    prompt = false
+  prompt = false
 [merge]
-    tool = vimdiff
+  tool = vimdiff
 [mergetool]
-    keepBackup = false
+  keepBackup = false
 [push]
-    default = current
+  default = current
