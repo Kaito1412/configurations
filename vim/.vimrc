@@ -105,6 +105,8 @@ inoremap <LeftMouse>   <nop>
 inoremap <2-LeftMouse> <nop>
 inoremap <3-LeftMouse> <nop>
 inoremap <4-LeftMouse> <nop>
+inoremap <Tab>         :bn<CR>
+inoremap <S-Tab>       :bp<CR>
 
 nmap     <Enter>       [<Space>
 nnoremap j             gj
@@ -122,7 +124,8 @@ nnoremap <LeftMouse>   <nop>
 nnoremap <2-LeftMouse> <nop>
 nnoremap <3-LeftMouse> <nop>
 nnoremap <4-LeftMouse> <nop>
-nnoremap <Tab> :bn<CR>
+nnoremap <Tab>         :bn<CR>
+nnoremap <S-Tab>       :bp<CR>
 
 
 """"""""""""""""""""""""""""""""""""""""""

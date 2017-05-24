@@ -1,6 +1,6 @@
 [user]
-  name = Kaito Mateu
-  email = kaito@cryptolab.net
+  name = Carlos Mateu
+  email = carlos.mateu@kairosds.com
 [core]
   editor = vim
 [alias]
@@ -14,7 +14,7 @@
   cp = cherry-pick
   dt = difftool
   ft = fetch
-  l = l
+  l = log
   la = log --all
   lp = log --graph --decorate --format=format:'%C(bold blue)%H%C(reset) - %C(reset) %C(bold green)(%ar)%C(reset)%C(bold yellow)%d%C(reset)%n''          %C(white)%s%C(reset) %C(dim white)- %an%C(reset)' --all
   mg  = merge
