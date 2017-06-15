@@ -109,6 +109,8 @@ inoremap <Tab>         :bn<CR>
 inoremap <S-Tab>       :bp<CR>
 
 nmap     <Enter>       [<Space>
+nmap     ,d            :b#<bar>bd#<CR>
+
 nnoremap j             gj
 nnoremap k             gk
 nnoremap <end>         <nop>

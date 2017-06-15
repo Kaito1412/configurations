@@ -29,7 +29,7 @@ source /usr/share/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zs
 
 [[ $- != *i* ]] && return
 if [ -f /usr/bin/archey3 ]; then archey3; fi
-alias reload="~/.zshrc"
+alias reload='~/.zshrc'
 alias ls='ls --color=auto'
 alias pacman='pacman --color=always'
 alias grep='grep --color'
@@ -42,20 +42,21 @@ promptinit
 
 bindkey -v
 bindkey '^R' history-incremental-search-backward
-bindkey "^[[3~"  delete-char
-bindkey "^[3;5~" delete-char
+bindkey '^?' backward-delete-char
+bindkey '^[[3~'  delete-char
+bindkey '^[3;5~' delete-char
 bindkey '\e[1~'  beginning-of-line
 bindkey '\e[4~'  end-of-line
-bindkey "^e[5~"  beginning-of-history
-bindkey "^e[6~"  end-of-history
+bindkey '^e[5~'  beginning-of-history
+bindkey '^e[6~'  end-of-history
 bindkey '\e[2~'  overwrite-mode
-bindkey "^e[5C"  forward-word
-bindkey "^eOc"   emacs-forward-word
-bindkey "e[5D"   backward-word
-bindkey "eOd"    emacs-backward-word
-bindkey "ee[C"   forward-word
-bindkey "ee[D"   backward-word
-bindkey "^H"     backward-delete-word
+bindkey '^e[5C'  forward-word
+bindkey '^eOc'   emacs-forward-word
+bindkey 'e[5D'   backward-word
+bindkey 'eOd'    emacs-backward-word
+bindkey 'ee[C'   forward-word
+bindkey 'ee[D'   backward-word
+bindkey '^H'     backward-delete-word
 
 # Binding in vimmode
 bindkey -M vicmd '^R' history-incremental-search-backward
